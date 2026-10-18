@@ -20,8 +20,8 @@ export function StatCard({
   const body = (
     <div
       className={cn(
-        "group relative h-full rounded-xl border bg-card p-4 shadow-xs transition-colors",
-        href && "hover:border-primary/40 hover:shadow-sm",
+        "group relative h-full rounded-xl border bg-card p-4 shadow-xs transition-all duration-200",
+        href && "hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md",
         tone === "warning" && "border-amber-200 bg-amber-50/40",
         tone === "danger" && "border-red-200 bg-red-50/40",
       )}

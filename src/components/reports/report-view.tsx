@@ -179,7 +179,7 @@ export async function ReportView({
       </div>
 
       {showSummary && result.summary && result.summary.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="stagger grid grid-cols-2 gap-3 lg:grid-cols-4">
           {result.summary.map((s) => (
             <div key={s.label} className="rounded-xl border bg-card px-4 py-3 shadow-xs">
               <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{s.label}</p>
@@ -251,7 +251,7 @@ export async function ReportView({
               </thead>
               <tbody className="divide-y">
                 {result.rows.map((row, i) => (
-                  <tr key={i} className="hover:bg-muted/30">
+                  <tr key={i} className="transition-colors duration-150 hover:bg-secondary/60">
                     {columns.map((c) => (
                       <td
                         key={c.key}

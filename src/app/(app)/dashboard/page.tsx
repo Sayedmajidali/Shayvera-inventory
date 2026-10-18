@@ -53,7 +53,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <h2 id="snapshot" className="mb-3 text-xs font-bold tracking-[0.22em] text-brand-orange uppercase">
           Current snapshot
         </h2>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <StatCard label="Active products" value={d.snapshot.activeProducts} href="/products?status=ACTIVE" />
           <StatCard
             label="Available units"
@@ -115,7 +115,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             </Button>
           </form>
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <StatCard
             label="Dispatches"
             value={d.period.dispatchDocs}

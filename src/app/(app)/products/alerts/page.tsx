@@ -53,7 +53,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         description="Low-stock alerts use each product's own threshold. Expiry alerts use each product's own alert period and every batch's expiry date."
         crumbs={[{ label: "Ready Products" }, { label: "Alerts" }]}
       />
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="stagger mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard
           label="Low-stock products"
           value={Number(counts.low)}
