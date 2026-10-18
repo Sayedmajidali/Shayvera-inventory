@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requirePage } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { PageHeader } from "@/components/app/page-header";
@@ -15,6 +15,7 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
     prisma.productTransaction.count({ where: { productId: id } }),
   ]);
   if (!p) notFound();
+  if (p.deletedAt) redirect(`/products/${p.id}`);
   return (
     <>
       <PageHeader

@@ -3,7 +3,16 @@
 import { act, formFile, formObject } from "@/server/action";
 import { prisma } from "@/server/db";
 import { ValidationError } from "@/server/errors";
-import { adjustRawMaterial, approveEntry, createRawMaterialEntry, rejectEntry, reverseInspection } from "@/server/services/raw-materials";
+import {
+  adjustRawMaterial,
+  approveEntry,
+  createRawMaterialEntry,
+  deleteRawMaterialEntry,
+  rejectEntry,
+  restoreRawMaterialEntry,
+  reverseInspection,
+  updateRawMaterialEntry,
+} from "@/server/services/raw-materials";
 import { replaceAttachment, uploadAttachment } from "@/server/services/attachments";
 
 const PATHS = ["/raw-materials", "/dashboard"];
@@ -16,6 +25,27 @@ export async function createEntryAction(fd: FormData) {
     },
     { revalidate: PATHS, message: "Entry saved — pending quality inspection" },
   );
+}
+
+export async function updateEntryAction(fd: FormData) {
+  return act(async (actor) => ({ id: (await updateRawMaterialEntry(actor, formObject(fd))).id }), {
+    revalidate: PATHS,
+    message: "Entry updated — the change is recorded in its history",
+  });
+}
+
+export async function deleteEntryAction(fd: FormData) {
+  return act((actor) => deleteRawMaterialEntry(actor, formObject(fd)), {
+    revalidate: PATHS,
+    message: "Entry deleted — kept in the audit trail",
+  });
+}
+
+export async function restoreEntryAction(fd: FormData) {
+  return act((actor) => restoreRawMaterialEntry(actor, formObject(fd)), {
+    revalidate: PATHS,
+    message: "Entry restored to pending inspection",
+  });
 }
 
 export async function approveAction(fd: FormData) {

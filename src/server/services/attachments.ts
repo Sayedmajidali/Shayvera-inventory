@@ -141,6 +141,7 @@ async function validateLinks(category: AttachmentCategory, links: AttachmentLink
     if (!links.rawMaterialEntryId) throw new ValidationError("Select the raw material entry this bill belongs to.");
     const entry = await prisma.rawMaterialEntry.findUnique({ where: { id: links.rawMaterialEntryId } });
     if (!entry) throw new NotFoundError("Raw material entry");
+    if (entry.deletedAt) throw new ValidationError("This entry has been deleted.");
     links.supplierId = entry.supplierId;
     links.billNumber = links.billNumber || entry.invoiceNumber || entry.poNumber;
   }

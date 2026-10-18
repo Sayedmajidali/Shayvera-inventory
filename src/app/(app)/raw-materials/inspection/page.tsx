@@ -22,6 +22,7 @@ export default async function InspectionPage({ searchParams }: { searchParams: P
   const page = Math.max(1, Number(sp.page) || 1);
   const where = {
     status: "PENDING_INSPECTION" as const,
+    deletedAt: null,
     supplierId: sp.supplierId || undefined,
     ...(sp.q
       ? {

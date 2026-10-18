@@ -3,6 +3,7 @@ import { prisma } from "../db";
 import { BUCKET, EXPIRY_STATUS, PRODUCT_TXN_TYPE, STOCK_STATUS, toOptions } from "@/lib/labels";
 import { and, badge, calDay, dt, like, link, paging, qty, range, sqlOrder, sqlPaging } from "./util";
 import type { Filters, ReportDef, RunContext } from "./types";
+import { can } from "../permissions";
 import { daysBetween, dateOnlyString } from "@/lib/dates";
 
 const PR_REPORT = ["product.reports"] as ReportDef["permission"];
@@ -42,6 +43,8 @@ export function productStockSql(today: string, f: Filters) {
   if (f.expiryStatus && f.expiryStatus in EXPIRY_STATUS) parts.push(Prisma.sql`x."expiryStatus" = ${f.expiryStatus}`);
   if (f.status === "ACTIVE") parts.push(Prisma.sql`x."active" = true`);
   if (f.status === "INACTIVE") parts.push(Prisma.sql`x."active" = false`);
+  // Deleted products (always zero stock) are hidden unless explicitly requested.
+  parts.push(f.status === "DELETED" ? Prisma.sql`x."deletedAt" IS NOT NULL` : Prisma.sql`x."deletedAt" IS NULL`);
   return Prisma.sql`
     WITH bal AS (
       SELECT sb."productId",
@@ -61,7 +64,7 @@ export function productStockSql(today: string, f: Filters) {
         MAX("createdAt") AS "lastTxn"
       FROM "ProductTransaction" GROUP BY "productId"
     ), x AS (
-      SELECT p."id", p."productCode", p."name", p."sku", p."categoryId", c."name" AS category, u."code" AS unit, p."active",
+      SELECT p."id", p."productCode", p."name", p."sku", p."categoryId", c."name" AS category, u."code" AS unit, p."active", p."deletedAt",
         p."lowStockThreshold" AS threshold, p."expiryAlertDays" AS "alertDays",
         COALESCE(bal.available, 0) AS available, COALESCE(bal."expiredSaleable", 0) AS "expiredSaleable",
         COALESCE(bal.quarantine, 0) AS quarantine, COALESCE(bal.damaged, 0) AS damaged, COALESCE(bal.expired, 0) AS expired,
@@ -170,6 +173,7 @@ const productMaster: ReportDef = {
     status: [
       { value: "ACTIVE", label: "Active" },
       { value: "INACTIVE", label: "Inactive" },
+      { value: "DELETED", label: "Deleted" },
     ],
   },
   columns: [
@@ -183,6 +187,7 @@ const productMaster: ReportDef = {
     { key: "alertDays", label: "Expiry alert (days)", align: "right", sortable: true },
     { key: "tracksExpiry", label: "Tracks expiry" },
     { key: "status", label: "Status" },
+    { key: "actions", label: "", screenOnly: true },
   ],
   defaultSort: "name",
   defaultDir: "asc",
@@ -190,6 +195,7 @@ const productMaster: ReportDef = {
     const where: Prisma.ReadyProductWhereInput = {
       categoryId: f.categoryId || undefined,
       active: f.status === "ACTIVE" ? true : f.status === "INACTIVE" ? false : undefined,
+      deletedAt: f.status === "DELETED" ? { not: null } : null,
       ...(f.q
         ? {
             OR: [
@@ -230,7 +236,22 @@ const productMaster: ReportDef = {
         threshold: qty(p.lowStockThreshold),
         alertDays: p.tracksExpiry ? p.expiryAlertDays : "—",
         tracksExpiry: p.tracksExpiry ? "Yes" : "No",
-        status: p.active ? { text: "Active", tone: "success" } : { text: "Inactive", tone: "muted" },
+        status: p.deletedAt
+          ? { text: "Deleted", tone: "muted" }
+          : p.active
+            ? { text: "Active", tone: "success" }
+            : { text: "Inactive", tone: "muted" },
+        actions: can(ctx.actor, "admin.masters")
+          ? p.deletedAt
+            ? { text: "", actions: [{ label: "Restore", kind: "restoreProduct", id: p.id, name: p.name }] }
+            : {
+                text: "",
+                actions: [
+                  { label: "Edit", href: `/products/${p.id}/edit` },
+                  { label: "Delete", kind: "deleteProduct", id: p.id, name: p.name },
+                ],
+              }
+          : null,
       })),
     };
   },

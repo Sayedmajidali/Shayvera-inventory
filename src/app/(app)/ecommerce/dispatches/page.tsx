@@ -20,7 +20,7 @@ export default async function DispatchesPage({ searchParams }: { searchParams: P
   const [stores, products] = canSales
     ? await Promise.all([
         prisma.store.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-        prisma.readyProduct.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, sku: true } }),
+        prisma.readyProduct.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, sku: true } }),
       ])
     : [[], []];
   return (

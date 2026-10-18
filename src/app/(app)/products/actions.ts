@@ -1,7 +1,16 @@
 "use server";
 
 import { act, formBool, formFile, formObject } from "@/server/action";
-import { adjustStock, createProduct, disposeQuarantine, receiveStock, setProductActive, updateProduct } from "@/server/services/products";
+import {
+  adjustStock,
+  createProduct,
+  deleteProduct,
+  disposeQuarantine,
+  receiveStock,
+  restoreProduct,
+  setProductActive,
+  updateProduct,
+} from "@/server/services/products";
 
 const PATHS = ["/products", "/dashboard", "/ecommerce"];
 
@@ -43,4 +52,12 @@ export async function disposeAction(fd: FormData) {
     revalidate: PATHS,
     message: "Quarantine decision posted",
   });
+}
+
+export async function deleteProductAction(fd: FormData) {
+  return act((actor) => deleteProduct(actor, formObject(fd)), { revalidate: PATHS, message: "Product deleted — history kept" });
+}
+
+export async function restoreProductAction(fd: FormData) {
+  return act((actor) => restoreProduct(actor, formObject(fd)), { revalidate: PATHS, message: "Product restored" });
 }

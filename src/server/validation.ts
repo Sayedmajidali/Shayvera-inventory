@@ -11,7 +11,7 @@ export function parse<T extends z.ZodTypeAny>(schema: T, input: unknown): z.infe
       if (!fieldErrors[key]) fieldErrors[key] = issue.message;
     }
     const first = result.error.issues[0];
-    throw new ValidationError(first ? `${first.path.join(".") || "Input"}: ${first.message}` : "Invalid input", fieldErrors);
+    throw new ValidationError(first ? first.message : "Invalid input", fieldErrors);
   }
   return result.data;
 }

@@ -132,6 +132,16 @@ export function ProductForm({
           <Textarea id="description" name="description" rows={3} defaultValue={v?.description} maxLength={2000} />
         </Field>
 
+        {editing && (
+          <Field
+            label="Note for this change"
+            htmlFor="changeReason"
+            className="sm:col-span-2"
+            hint="Optional. Saved in the product's change history with the old and new values."
+          >
+            <Input id="changeReason" name="changeReason" maxLength={1000} />
+          </Field>
+        )}
         {!editing && (
           <fieldset className="space-y-4 rounded-lg border border-dashed p-4 sm:col-span-2">
             <legend className="px-1 text-sm font-medium">Opening stock (optional)</legend>

@@ -21,6 +21,7 @@ import { dateOnly, todayInTz } from "@/lib/dates";
 import { dec } from "@/lib/decimal";
 import { createAttachmentRecord, storeFile, type UploadFile } from "./attachments";
 import { evaluateLowStock, postProductTxn } from "./inventory-core";
+import { describeChanges, diffFields } from "../changes";
 
 const optionalDay = z.preprocess((v) => (v === "" || v === null ? undefined : v), isoDay.optional());
 
@@ -126,8 +127,10 @@ export async function createProduct(actor: Actor, input: unknown, image?: Upload
 export async function updateProduct(actor: Actor, id: string, input: unknown, image?: UploadFile | null) {
   assertCan(actor, "admin.masters");
   const data = parse(productSchema, input);
-  const before = await prisma.readyProduct.findUnique({ where: { id } });
+  const note = parse(z.object({ changeReason: optionalText(1000) }), input).changeReason;
+  const before = await prisma.readyProduct.findUnique({ where: { id }, include: { unit: true, category: true } });
   if (!before) throw new NotFoundError("Product");
+  if (before.deletedAt) throw new ValidationError("Deleted products cannot be edited.");
   const unit = await loadUnitAndCategory(data.unitId, data.categoryId);
   assertUnitPrecision(data.lowStockThreshold, unit, "lowStockThreshold");
   if (data.unitId !== before.unitId) {
@@ -135,8 +138,33 @@ export async function updateProduct(actor: Actor, id: string, input: unknown, im
     if (moved > 0)
       throw new ValidationError("The unit cannot be changed after stock has been posted.", { unitId: "Locked after first transaction" });
   }
+  const category = data.categoryId ? await prisma.productCategory.findUnique({ where: { id: data.categoryId } }) : null;
+  const changes = diffFields([
+    { field: "name", label: "Product name", from: before.name, to: data.name },
+    { field: "sku", label: "SKU", from: before.sku, to: data.sku },
+    { field: "barcode", label: "Barcode", from: before.barcode, to: data.barcode },
+    { field: "category", label: "Category", from: before.category?.name, to: category?.name },
+    { field: "unit", label: "Unit", from: before.unit.code, to: unit.code },
+    {
+      field: "lowStockThreshold",
+      label: "Low-stock threshold",
+      from: dec(before.lowStockThreshold).toString(),
+      to: data.lowStockThreshold.toString(),
+    },
+    { field: "tracksExpiry", label: "Tracks expiry", from: before.tracksExpiry, to: data.tracksExpiry },
+    { field: "expiryAlertDays", label: "Expiry alert (days)", from: before.expiryAlertDays, to: data.expiryAlertDays },
+    { field: "description", label: "Description", from: before.description, to: data.description },
+  ]);
   const settings = await readSettings();
   const prepared = image && image.size > 0 ? await storeFile(image, "PRODUCT_IMAGE") : null;
+  if (prepared)
+    changes.push({
+      field: "image",
+      label: "Product image",
+      from: before.imageAttachmentId ? "previous image" : null,
+      to: prepared.fileName,
+    });
+  if (changes.length === 0) throw new ValidationError("Nothing was changed.");
   try {
     return await withTransaction(async (tx) => {
       let imageAttachmentId = before.imageAttachmentId;
@@ -149,40 +177,108 @@ export async function updateProduct(actor: Actor, id: string, input: unknown, im
         }
         imageAttachmentId = (await createAttachmentRecord(tx, actor, "PRODUCT_IMAGE", prepared, {})).id;
       }
-      const product = await tx.readyProduct.update({ where: { id }, data: { ...data, imageAttachmentId } });
+      const updated = await tx.readyProduct.updateMany({ where: { id, deletedAt: null }, data: { ...data, imageAttachmentId } });
+      if (updated.count !== 1) throw new ValidationError("This product was deleted while you were editing it.");
       await evaluateLowStock(tx, id, todayInTz(settings.timezone));
       await audit(tx, {
         actorId: actor.id,
         action: "product.update",
         entityType: "ReadyProduct",
         entityId: id,
-        summary: `Updated product ${product.name} (${product.sku})`,
-        details: {
-          before: {
-            lowStockThreshold: before.lowStockThreshold.toString(),
-            expiryAlertDays: before.expiryAlertDays,
-            name: before.name,
-            sku: before.sku,
-          },
-          after: {
-            lowStockThreshold: data.lowStockThreshold.toString(),
-            expiryAlertDays: data.expiryAlertDays,
-            name: data.name,
-            sku: data.sku,
-          },
-        },
+        summary: `Edited product ${data.name} (${data.sku}): ${describeChanges(changes)}`,
+        details: { changes: changes as unknown as Prisma.InputJsonValue, reason: note },
       });
-      return product;
+      return { id, changes };
     });
   } catch (e) {
     throw uniqueError(e) ?? e;
   }
 }
 
+/**
+ * Delete a product from the master (soft delete). Allowed only when it holds no
+ * stock in any bucket, so no inventory disappears; batches, ledger rows and
+ * reports keep the full history, and the SKU stays reserved.
+ */
+export async function deleteProduct(actor: Actor, input: unknown) {
+  assertCan(actor, "admin.masters");
+  const data = parse(z.object({ productId: requiredText(50, "Product"), reason: requiredText(1000, "Reason for deleting") }), input);
+  const settings = await readSettings();
+  return withTransaction(async (tx) => {
+    // Lock the product (receipts take the same lock) and its balances so no stock can arrive while we check.
+    await tx.$queryRaw`SELECT "id" FROM "ReadyProduct" WHERE "id" = ${data.productId} FOR UPDATE`;
+    const balances = await tx.$queryRaw<{ bucket: StockBucket; qty: Prisma.Decimal }[]>`
+      SELECT "bucket", "quantity" AS qty FROM "StockBalance" WHERE "productId" = ${data.productId} FOR UPDATE`;
+    const product = await tx.readyProduct.findUnique({ where: { id: data.productId }, include: { unit: true } });
+    if (!product) throw new NotFoundError("Product");
+    if (product.deletedAt) throw new ValidationError("This product has already been deleted.");
+    const held = balances.filter((b) => dec(b.qty).gt(0));
+    if (held.length) {
+      const list = held.map((b) => `${dec(b.qty).toString()} ${product.unit.code} ${b.bucket.toLowerCase()}`).join(", ");
+      throw new ValidationError(
+        `${product.name} still has stock (${list}). Dispatch it, or post adjustments with a reason to bring every bucket to zero, before deleting.`,
+      );
+    }
+    const updated = await tx.readyProduct.updateMany({
+      where: { id: product.id, deletedAt: null },
+      data: { deletedAt: new Date(), deletedById: actor.id, deleteReason: data.reason, active: false },
+    });
+    if (updated.count !== 1) throw new ValidationError("This product has already been deleted.");
+    await evaluateLowStock(tx, product.id, todayInTz(settings.timezone));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "product.delete",
+      entityType: "ReadyProduct",
+      entityId: product.id,
+      summary: `Deleted product ${product.name} (${product.sku}): ${data.reason}`,
+      details: {
+        reason: data.reason,
+        snapshot: {
+          productCode: product.productCode,
+          name: product.name,
+          sku: product.sku,
+          barcode: product.barcode,
+          unit: product.unit.code,
+          lowStockThreshold: dec(product.lowStockThreshold).toString(),
+          expiryAlertDays: product.expiryAlertDays,
+        },
+      },
+    });
+  });
+}
+
+/** Undo a product deletion. The product comes back active with its full history. */
+export async function restoreProduct(actor: Actor, input: unknown) {
+  assertCan(actor, "admin.masters");
+  const data = parse(z.object({ productId: requiredText(50, "Product"), reason: requiredText(1000, "Reason for restoring") }), input);
+  const settings = await readSettings();
+  return withTransaction(async (tx) => {
+    const product = await tx.readyProduct.findUnique({ where: { id: data.productId } });
+    if (!product) throw new NotFoundError("Product");
+    const updated = await tx.readyProduct.updateMany({
+      where: { id: product.id, deletedAt: { not: null } },
+      data: { deletedAt: null, deletedById: null, deleteReason: null, active: true },
+    });
+    if (updated.count !== 1) throw new ValidationError("This product is not deleted.");
+    await evaluateLowStock(tx, product.id, todayInTz(settings.timezone));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "product.restore",
+      entityType: "ReadyProduct",
+      entityId: product.id,
+      summary: `Restored product ${product.name} (${product.sku}): ${data.reason}`,
+      details: { reason: data.reason, previousDeleteReason: product.deleteReason },
+    });
+  });
+}
+
 export async function setProductActive(actor: Actor, id: string, active: boolean) {
   assertCan(actor, "admin.masters");
   const settings = await readSettings();
   return withTransaction(async (tx) => {
+    const current = await tx.readyProduct.findUnique({ where: { id } });
+    if (!current) throw new NotFoundError("Product");
+    if (current.deletedAt) throw new ValidationError("Deleted products cannot be reactivated.");
     const p = await tx.readyProduct.update({ where: { id }, data: { active } });
     await evaluateLowStock(tx, id, todayInTz(settings.timezone));
     await audit(tx, {
@@ -227,6 +323,10 @@ export async function receiveStock(actor: Actor, input: unknown) {
   const today = todayInTz(settings.timezone);
   try {
     const txn = await withTransaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<{ active: boolean; deletedAt: Date | null }[]>`
+        SELECT "active", "deletedAt" FROM "ReadyProduct" WHERE "id" = ${product.id} FOR UPDATE`;
+      if (!locked?.active || locked.deletedAt)
+        throw new ValidationError("Select an active product.", { productId: "Inactive or deleted product" });
       const batchNo = data.batchNo || (await nextNumber(tx, "batch"));
       let batch = await tx.productBatch.findUnique({ where: { productId_batchNo: { productId: product.id, batchNo } } });
       const expiry = product.tracksExpiry && data.expiryDate ? dateOnly(data.expiryDate) : null;

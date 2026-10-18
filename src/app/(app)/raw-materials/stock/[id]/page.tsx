@@ -26,7 +26,7 @@ export default async function MaterialPage({
   const m = await prisma.rawMaterial.findUnique({ where: { id }, include: { unit: true } });
   if (!m) notFound();
   const pending = await prisma.rawMaterialEntry.aggregate({
-    where: { rawMaterialId: id, status: "PENDING_INSPECTION" },
+    where: { rawMaterialId: id, status: "PENDING_INSPECTION", deletedAt: null },
     _sum: { quantity: true },
     _count: true,
   });

@@ -10,6 +10,8 @@ import { formatDateTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import { FilterBar, type FilterField } from "./filter-bar";
 import { PrintButton } from "./print-button";
+import { RowActions } from "./row-actions";
+import { getCurrentUser } from "@/server/auth";
 
 const LABELS: Record<FilterKey, string> = {
   q: "Search",
@@ -52,10 +54,13 @@ async function optionsFor(key: FilterKey, def: ReportDef): Promise<SelectOption[
         label: s.active ? s.name : `${s.name} (inactive)`,
       }));
     case "productId":
-      return (await prisma.readyProduct.findMany({ orderBy: { name: "asc" } })).map((p) => ({
-        value: p.id,
-        label: `${p.name} · ${p.sku}`,
-      }));
+      // Deleted products stay filterable for history, listed last.
+      return (await prisma.readyProduct.findMany({ orderBy: [{ deletedAt: { sort: "asc", nulls: "first" } }, { name: "asc" }] })).map(
+        (p) => ({
+          value: p.id,
+          label: `${p.name} · ${p.sku}${p.deletedAt ? " (deleted)" : ""}`,
+        }),
+      );
     case "categoryId":
       return (await prisma.productCategory.findMany({ orderBy: { name: "asc" } })).map((c) => ({ value: c.id, label: c.name }));
     default:
@@ -78,11 +83,15 @@ function qs(params: Params, patch: Record<string, string | undefined>) {
 }
 
 // Free-text columns may wrap; everything else stays on one line and the table scrolls sideways.
+// Row actions stay visible at the right edge while the rest of a wide table scrolls.
+const STICKY = "no-print sticky right-0 z-10 bg-card shadow-[-10px_0_10px_-10px_rgba(0,0,0,0.18)]";
+
 const WRAP = new Set(["notes", "reason", "summary", "description"]);
 
 export function CellView({ cell }: { cell: Cell }) {
   if (cell === null || cell === undefined || cell === "") return <span className="text-muted-foreground">—</span>;
   if (typeof cell !== "object") return <>{cell}</>;
+  if ("actions" in cell) return <RowActions actions={cell.actions} />;
   if (cell.tone) return <StatusBadge tone={cell.tone}>{cell.text}</StatusBadge>;
   if (cell.href?.startsWith("/api/files/"))
     return (
@@ -128,7 +137,8 @@ export async function ReportView({
   emptyDescription?: string;
   pageSize?: number;
 }) {
-  const { result, filters, page, size, sort, dir, settings } = await runReport(def, params, { fixed, pageSize });
+  const actor = await getCurrentUser();
+  const { result, filters, page, size, sort, dir, settings } = await runReport(def, params, { fixed, pageSize, actor: actor ?? undefined });
   const visibleFilters = def.filters.filter((k) => !hide.includes(k) && !(fixed && k in fixed));
   const fields: FilterField[] = await Promise.all(
     visibleFilters.map(async (k) => ({
@@ -217,6 +227,7 @@ export async function ReportView({
                         key={c.key}
                         scope="col"
                         className={cn(
+                          c.screenOnly && STICKY,
                           "px-3 py-2.5 text-xs font-semibold whitespace-nowrap text-muted-foreground",
                           c.align === "right" && "text-right",
                         )}
@@ -245,6 +256,7 @@ export async function ReportView({
                       <td
                         key={c.key}
                         className={cn(
+                          c.screenOnly && STICKY,
                           "px-3 py-2.5 align-top",
                           c.align === "right"
                             ? "text-right tabular-nums whitespace-nowrap"

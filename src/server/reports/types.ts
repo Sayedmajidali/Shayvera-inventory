@@ -1,4 +1,4 @@
-import type { Permission } from "../permissions";
+import type { Actor, Permission } from "../permissions";
 
 export type FilterKey =
   | "q"
@@ -23,7 +23,16 @@ export type Filters = Partial<Record<FilterKey, string>>;
 
 export type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "muted";
 
-export type Cell = string | number | null | { text: string; href?: string; tone?: Tone; download?: boolean };
+export type RowAction =
+  | { label: string; href: string }
+  | { label: string; kind: "deleteEntry" | "restoreEntry" | "deleteProduct" | "restoreProduct"; id: string; name: string };
+
+export type Cell =
+  | string
+  | number
+  | null
+  | { text: string; href?: string; tone?: Tone; download?: boolean }
+  | { text: ""; actions: RowAction[] };
 
 export interface Column {
   key: string;
@@ -32,9 +41,13 @@ export interface Column {
   sortable?: boolean;
   /** Hidden in the on-screen table but included in CSV. */
   csvOnly?: boolean;
+  /** Shown on screen only (e.g. row action buttons); never exported. */
+  screenOnly?: boolean;
 }
 
 export interface RunContext {
+  /** The viewer, so a report can offer row actions they are allowed to use. */
+  actor?: Pick<Actor, "role" | "permissions">;
   tz: string;
   today: string;
   dateFormat: string;
@@ -77,7 +90,7 @@ export const CSV_ROW_LIMIT = 50_000;
 
 export function cellText(c: Cell): string {
   if (c === null || c === undefined) return "";
-  if (typeof c === "object") return c.text;
+  if (typeof c === "object") return "actions" in c ? "" : c.text;
   return String(c);
 }
 

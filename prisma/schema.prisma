@@ -47,6 +47,8 @@ model User {
   auditLogs AuditLog[]
 
   rawEntries          RawMaterialEntry[]       @relation("EntryCreatedBy")
+  rawEntriesDeleted   RawMaterialEntry[]       @relation("EntryDeletedBy")
+  productsDeleted     ReadyProduct[]           @relation("ProductDeletedBy")
   inspections         QualityInspection[]      @relation("InspectedBy")
   inspectionReversals QualityInspection[]      @relation("InspectionReversedBy")
   rawTransactions     RawMaterialTransaction[]
@@ -218,12 +220,18 @@ model RawMaterialEntry {
   createdBy      User        @relation("EntryCreatedBy", fields: [createdById], references: [id])
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
+  // Soft delete: only allowed while pending (no stock posted). The row is kept
+  // for the audit trail and hidden from lists, counts and inspection.
+  deletedAt      DateTime?
+  deletedById    String?
+  deletedBy      User?       @relation("EntryDeletedBy", fields: [deletedById], references: [id])
+  deleteReason   String?
 
   inspections  QualityInspection[]
   transactions RawMaterialTransaction[]
   attachments  BillAttachment[]
 
-  @@index([status])
+  @@index([status, deletedAt])
   @@index([entryDate])
   @@index([supplierId])
   @@index([rawMaterialId])
@@ -318,6 +326,12 @@ model ReadyProduct {
   active            Boolean          @default(true)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+  // Soft delete: only allowed with zero stock in every bucket. History, batches
+  // and ledger rows are kept; the SKU stays reserved.
+  deletedAt         DateTime?
+  deletedById       String?
+  deletedBy         User?            @relation("ProductDeletedBy", fields: [deletedById], references: [id])
+  deleteReason      String?
 
   batches        ProductBatch[]
   balances       StockBalance[]

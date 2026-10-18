@@ -323,6 +323,12 @@ export async function createReturn(actor: Actor, input: unknown, document?: Uplo
         include: { unit: true },
       });
       const productMap = new Map(products.map((p) => [p.id, p]));
+      const deleted = products.find((p) => p.deletedAt);
+      if (deleted) {
+        throw new ValidationError(
+          `${deleted.name} has been deleted from the product master. Ask an administrator to restore it before recording this return.`,
+        );
+      }
 
       const pr = await tx.productReturn.create({
         data: {

@@ -39,8 +39,8 @@ export async function getDashboard({ from, to, tz, today, dateFormat }: Dashboar
       FROM "StockBalance" sb JOIN "ProductBatch" b ON b."id" = sb."batchId" JOIN "ReadyProduct" p ON p."id" = sb."productId" JOIN "Unit" u ON u."id" = p."unitId"
       WHERE sb."bucket" = 'SALEABLE' AND p."active" = true AND (b."expiryDate" IS NULL OR b."expiryDate" >= ${today}::date)
       GROUP BY u."code" ORDER BY u."code"`,
-    prisma.rawMaterialEntry.groupBy({ by: ["status"], where: { entryDate: range }, _count: true }),
-    prisma.rawMaterialEntry.count({ where: { status: "PENDING_INSPECTION" } }),
+    prisma.rawMaterialEntry.groupBy({ by: ["status"], where: { entryDate: range, deletedAt: null }, _count: true }),
+    prisma.rawMaterialEntry.count({ where: { status: "PENDING_INSPECTION", deletedAt: null } }),
     prisma.lowStockAlert.count({ where: { status: "OPEN", product: { active: true } } }),
     prisma.$queryRaw<{ expired: bigint; near: bigint }[]>`
       SELECT
@@ -62,12 +62,13 @@ export async function getDashboard({ from, to, tz, today, dateFormat }: Dashboar
     }),
     prisma.rawMaterialEntry.findMany({
       take: 6,
+      where: { deletedAt: null },
       orderBy: { createdAt: "desc" },
       include: { rawMaterial: true, supplier: true, unit: true },
     }),
     prisma.rawMaterialEntry.findMany({
       take: 6,
-      where: { status: "PENDING_INSPECTION" },
+      where: { status: "PENDING_INSPECTION", deletedAt: null },
       orderBy: { entryDate: "asc" },
       include: { rawMaterial: true, supplier: true, unit: true },
     }),

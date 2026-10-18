@@ -68,7 +68,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
 
   const query = Object.fromEntries(req.nextUrl.searchParams.entries());
   const { result, filters, settings } = await runReport(def, query, { all: true });
-  const columns = def.columns;
+  const columns = def.columns.filter((c) => !c.screenOnly);
   const meta: unknown[][] = [
     ["Report", def.title],
     ["Generated", `${formatDateTime(new Date(), settings.timezone, settings.dateFormat)} (${settings.timezone})`],

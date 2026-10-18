@@ -1,5 +1,6 @@
 import "server-only";
 import { readSettings } from "../settings";
+import type { Actor } from "../permissions";
 import { todayInTz } from "@/lib/dates";
 import { sortKey, type FilterKey, type Filters, type ReportDef, type ReportResult } from "./types";
 
@@ -22,7 +23,11 @@ export function filtersFrom(def: ReportDef, params: Params, fixed: Filters = {})
   return { ...f, ...fixed };
 }
 
-export async function runReport(def: ReportDef, params: Params, opts: { all?: boolean; fixed?: Filters; pageSize?: number } = {}) {
+export async function runReport(
+  def: ReportDef,
+  params: Params,
+  opts: { all?: boolean; fixed?: Filters; pageSize?: number; actor?: Pick<Actor, "role" | "permissions"> } = {},
+) {
   const settings = await readSettings();
   const filters = filtersFrom(def, params, opts.fixed);
   const page = Math.max(1, Number.parseInt(str(params, "page") ?? "1", 10) || 1);
@@ -37,6 +42,7 @@ export async function runReport(def: ReportDef, params: Params, opts: { all?: bo
     page: opts.all ? null : { skip: (page - 1) * size, take: size },
     sort,
     dir,
+    actor: opts.actor,
   });
   return { result, filters, page, size, sort, dir, settings };
 }

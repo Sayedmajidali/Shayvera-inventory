@@ -2,13 +2,17 @@ import { Prisma, type EntryStatus } from "@prisma/client";
 import { prisma } from "../db";
 import { ENTRY_STATUS, RAW_TXN_TYPE, ATTACHMENT_STATUS, toOptions } from "@/lib/labels";
 import { and, badge, dt, like, link, paging, qty, range, sqlOrder, sqlPaging } from "./util";
-import type { Filters, ReportDef, RunContext } from "./types";
+import type { Cell, Filters, ReportDef, RowAction, RunContext } from "./types";
+import { can } from "../permissions";
 
 const RM_REPORT = ["rm.reports"] as ReportDef["permission"];
 
 function entryWhere(f: Filters, ctx: RunContext, fixedStatus?: EntryStatus): Prisma.RawMaterialEntryWhereInput {
+  // Deleted entries are hidden unless the "Deleted" status is chosen explicitly.
+  const showDeleted = !fixedStatus && f.status === "DELETED";
   const status = fixedStatus ?? (f.status && f.status in ENTRY_STATUS ? (f.status as EntryStatus) : undefined);
   return {
+    deletedAt: showDeleted ? { not: null } : null,
     entryDate: range(f, ctx),
     supplierId: f.supplierId || undefined,
     rawMaterialId: f.materialId || undefined,
@@ -48,6 +52,20 @@ async function totalsByUnit(where: Prisma.RawMaterialEntryWhereInput) {
   }));
 }
 
+function entryActions(e: { id: string; entryNo: string; status: EntryStatus; deletedAt: Date | null }, ctx: RunContext): Cell {
+  const actions: RowAction[] = [];
+  if (e.deletedAt) {
+    if (can(ctx.actor, "rm.entry.delete")) actions.push({ label: "Restore", kind: "restoreEntry", id: e.id, name: e.entryNo });
+  } else if (e.status === "PENDING_INSPECTION") {
+    if (can(ctx.actor, "rm.entry.edit")) actions.push({ label: "Edit", href: `/raw-materials/entries/${e.id}/edit` });
+    if (can(ctx.actor, "rm.entry.delete")) actions.push({ label: "Delete", kind: "deleteEntry", id: e.id, name: e.entryNo });
+  } else if (can(ctx.actor, "rm.entry.edit") || can(ctx.actor, "rm.entry.delete")) {
+    // Inspected entries have stock on the ledger; they unlock only via an inspection reversal.
+    return { text: "Locked", tone: "muted" };
+  }
+  return actions.length ? { text: "", actions } : null;
+}
+
 function entriesReport(key: string, title: string, description: string, fixedStatus?: EntryStatus): ReportDef {
   const permission: ReportDef["permission"] =
     fixedStatus === "PENDING_INSPECTION" ? ["rm.view", "rm.inspect", "rm.reports"] : ["rm.view", "rm.reports"];
@@ -82,6 +100,7 @@ function entriesReport(key: string, title: string, description: string, fixedSta
           ]
         : [{ key: "bills", label: "Bills" }]),
       { key: "enteredBy", label: "Entered by" },
+      ...(fixedStatus ? [] : [{ key: "actions", label: "", screenOnly: true }]),
     ],
     defaultSort: "entryDate",
     async run(f, ctx) {
@@ -117,13 +136,14 @@ function entriesReport(key: string, title: string, description: string, fixedSta
             unit: e.unit.code,
             po: e.poNumber ?? "—",
             invoice: e.invoiceNumber ?? "—",
-            status: badge(ENTRY_STATUS, e.status),
+            status: e.deletedAt ? { text: "Deleted", tone: "muted" } : badge(ENTRY_STATUS, e.status),
             bills: e._count.attachments ? `${e._count.attachments}` : { text: "None", tone: "muted" },
             inspectedBy: insp?.inspectedBy.name ?? "—",
             inspectedAt: insp ? dt(ctx, insp.inspectedAt) : "—",
             reason: insp?.rejectionReason ?? "—",
             notes: insp?.notes ?? "—",
             enteredBy: e.createdBy.name,
+            actions: entryActions(e, ctx),
           };
         }),
       };
@@ -160,6 +180,7 @@ function groupedInward(key: string, title: string, description: string, by: "sup
       if (f.supplierId) parts.push(Prisma.sql`e."supplierId" = ${f.supplierId}`);
       if (f.materialId) parts.push(Prisma.sql`e."rawMaterialId" = ${f.materialId}`);
       if (f.unitId) parts.push(Prisma.sql`e."unitId" = ${f.unitId}`);
+      parts.push(Prisma.sql`e."deletedAt" IS NULL`);
       if (f.status && f.status in ENTRY_STATUS) parts.push(Prisma.sql`e."status" = ${f.status}::"EntryStatus"`);
       const groupCol = by === "supplier" ? Prisma.sql`s."id", s."name"` : Prisma.sql`m."id", m."name"`;
       const order = sqlOrder(
@@ -326,7 +347,7 @@ export const rawStock: ReportDef = {
           COALESCE((SELECT SUM(t."quantity") FROM "RawMaterialTransaction" t WHERE t."rawMaterialId" = m."id" AND t."type" = 'INWARD_APPROVED'), 0) AS inward,
           COALESCE((SELECT -SUM(t."quantity") FROM "RawMaterialTransaction" t WHERE t."rawMaterialId" = m."id" AND t."type" = 'PRODUCTION_ISSUE'), 0) AS issued,
           COALESCE((SELECT SUM(t."quantity") FROM "RawMaterialTransaction" t WHERE t."rawMaterialId" = m."id" AND t."type" IN ('INSPECTION_REVERSAL', 'ADJUSTMENT')), 0) AS corrections,
-          COALESCE((SELECT SUM(e."quantity") FROM "RawMaterialEntry" e WHERE e."rawMaterialId" = m."id" AND e."status" = 'PENDING_INSPECTION'), 0) AS pending,
+          COALESCE((SELECT SUM(e."quantity") FROM "RawMaterialEntry" e WHERE e."rawMaterialId" = m."id" AND e."status" = 'PENDING_INSPECTION' AND e."deletedAt" IS NULL), 0) AS pending,
           (SELECT MAX(t."createdAt") FROM "RawMaterialTransaction" t WHERE t."rawMaterialId" = m."id") AS "lastTxn"
         FROM "RawMaterial" m JOIN "Unit" u ON u."id" = m."unitId"
         ${and(parts)}

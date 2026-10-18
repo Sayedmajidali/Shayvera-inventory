@@ -10,6 +10,7 @@ import { assertUnitPrecision, idempotencyKey, optionalText, parse, positiveQty, 
 import { parseLocalDateTime } from "@/lib/dates";
 import { dec } from "@/lib/decimal";
 import { createAttachmentRecord, storeFile, type UploadFile } from "./attachments";
+import { describeChanges, diffFields } from "../changes";
 
 export function normalizeName(name: string) {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
@@ -159,6 +160,180 @@ export async function createRawMaterialEntry(actor: Actor, input: unknown, bill?
   }
 }
 
+const entryEditSchema = z
+  .object({
+    entryId: requiredText(50, "Entry"),
+    entryDate: z.string().min(1, "Entry date is required"),
+    materialName: requiredText(150, "Product name"),
+    supplierId: requiredText(50, "Supplier"),
+    quantity: positiveQty,
+    unitId: requiredText(50, "Unit"),
+    poNumber: optionalText(60),
+    invoiceNumber: optionalText(60),
+    notes: optionalText(1000),
+    reason: requiredText(1000, "Reason for the change"),
+  })
+  .refine((v) => v.poNumber || v.invoiceNumber, {
+    message: "Enter a PO number or an invoice number",
+    path: ["invoiceNumber"],
+  });
+
+/**
+ * Correct a pending entry. Only entries that have not been inspected can be
+ * edited (no stock has been posted). Every changed field is written to the
+ * audit log with its old and new value and the reason.
+ */
+export async function updateRawMaterialEntry(actor: Actor, input: unknown) {
+  assertCan(actor, "rm.entry.edit");
+  const data = parse(entryEditSchema, input);
+  const settings = await readSettings();
+  const entryDate = parseLocalDateTime(data.entryDate, settings.timezone);
+  if (!entryDate) throw new ValidationError("Enter a valid entry date and time.", { entryDate: "Invalid date" });
+  if (entryDate.getTime() > Date.now() + 5 * 60_000)
+    throw new ValidationError("Entry date cannot be in the future.", { entryDate: "In the future" });
+
+  const [supplier, unit] = await Promise.all([
+    prisma.supplier.findUnique({ where: { id: data.supplierId } }),
+    prisma.unit.findUnique({ where: { id: data.unitId } }),
+  ]);
+  if (!supplier) throw new ValidationError("Select a supplier.", { supplierId: "Select a supplier" });
+  if (!unit) throw new ValidationError("Select a valid unit.", { unitId: "Select a valid unit" });
+  assertUnitPrecision(data.quantity, unit);
+
+  return withTransaction(async (tx) => {
+    const before = await tx.rawMaterialEntry.findUnique({
+      where: { id: data.entryId },
+      include: { rawMaterial: true, supplier: true, unit: true },
+    });
+    if (!before) throw new NotFoundError("Raw material entry");
+    if (before.deletedAt) throw new ValidationError("This entry has been deleted.");
+    if (before.status !== "PENDING_INSPECTION") {
+      throw new ValidationError(
+        "Only entries pending inspection can be edited. Ask an administrator to reverse the inspection decision first.",
+      );
+    }
+    // A newly selected supplier or unit must be active; keeping the current one is always allowed.
+    if (supplier.id !== before.supplierId && !supplier.active)
+      throw new ValidationError("Select an active supplier.", { supplierId: "Inactive supplier" });
+    if (unit.id !== before.unitId && !unit.active) throw new ValidationError("Select an active unit.", { unitId: "Inactive unit" });
+
+    const material = await findOrCreateMaterial(tx, data.materialName, unit.id);
+    const changes = diffFields([
+      { field: "entryDate", label: "Entry date", from: before.entryDate, to: entryDate },
+      { field: "material", label: "Product", from: before.rawMaterial.name, to: material.name },
+      { field: "supplier", label: "Supplier", from: before.supplier.name, to: supplier.name },
+      { field: "quantity", label: "Quantity", from: dec(before.quantity).toString(), to: data.quantity.toString() },
+      { field: "unit", label: "Unit", from: before.unit.code, to: unit.code },
+      { field: "poNumber", label: "PO number", from: before.poNumber, to: data.poNumber },
+      { field: "invoiceNumber", label: "Invoice number", from: before.invoiceNumber, to: data.invoiceNumber },
+      { field: "notes", label: "Notes", from: before.notes, to: data.notes },
+    ]);
+    if (changes.length === 0) throw new ValidationError("Nothing was changed.");
+
+    // Guarded update: fails if the entry was inspected or deleted meanwhile.
+    const updated = await tx.rawMaterialEntry.updateMany({
+      where: { id: before.id, status: "PENDING_INSPECTION", deletedAt: null },
+      data: {
+        entryDate,
+        rawMaterialId: material.id,
+        supplierId: supplier.id,
+        quantity: data.quantity,
+        unitId: unit.id,
+        poNumber: data.poNumber,
+        invoiceNumber: data.invoiceNumber,
+        notes: data.notes,
+      },
+    });
+    if (updated.count !== 1) throw new ValidationError("This entry was inspected or deleted while you were editing it.");
+    if (supplier.id !== before.supplierId) {
+      await tx.billAttachment.updateMany({ where: { rawMaterialEntryId: before.id }, data: { supplierId: supplier.id } });
+    }
+
+    await audit(tx, {
+      actorId: actor.id,
+      action: "raw_entry.update",
+      entityType: "RawMaterialEntry",
+      entityId: before.id,
+      summary: `Edited ${before.entryNo}: ${describeChanges(changes)}`,
+      details: { changes: changes as unknown as Prisma.InputJsonValue, reason: data.reason },
+    });
+    return { id: before.id, changes };
+  });
+}
+
+/**
+ * Delete a pending entry by marking it deleted (soft delete). The row, its
+ * bills and the full audit trail are kept; it no longer appears in lists,
+ * counts or the inspection queue and can never be inspected.
+ */
+export async function deleteRawMaterialEntry(actor: Actor, input: unknown) {
+  assertCan(actor, "rm.entry.delete");
+  const data = parse(z.object({ entryId: requiredText(50, "Entry"), reason: requiredText(1000, "Reason for deleting") }), input);
+  return withTransaction(async (tx) => {
+    const entry = await tx.rawMaterialEntry.findUnique({
+      where: { id: data.entryId },
+      include: { rawMaterial: true, supplier: true, unit: true },
+    });
+    if (!entry) throw new NotFoundError("Raw material entry");
+    if (entry.deletedAt) throw new ValidationError("This entry has already been deleted.");
+    if (entry.status !== "PENDING_INSPECTION") {
+      throw new ValidationError(
+        entry.status === "APPROVED"
+          ? "Approved entries cannot be deleted because their stock is on the ledger. An administrator can reverse the approval first."
+          : "Rejected entries stay on record for reporting. An administrator can reverse the rejection first if it was entered by mistake.",
+      );
+    }
+    const updated = await tx.rawMaterialEntry.updateMany({
+      where: { id: entry.id, status: "PENDING_INSPECTION", deletedAt: null },
+      data: { deletedAt: new Date(), deletedById: actor.id, deleteReason: data.reason },
+    });
+    if (updated.count !== 1) throw new ValidationError("This entry was inspected or deleted meanwhile.");
+    await audit(tx, {
+      actorId: actor.id,
+      action: "raw_entry.delete",
+      entityType: "RawMaterialEntry",
+      entityId: entry.id,
+      summary: `Deleted ${entry.entryNo} (${dec(entry.quantity).toString()} ${entry.unit.code} ${entry.rawMaterial.name} from ${entry.supplier.name}): ${data.reason}`,
+      details: {
+        reason: data.reason,
+        snapshot: {
+          entryNo: entry.entryNo,
+          entryDate: entry.entryDate.toISOString(),
+          material: entry.rawMaterial.name,
+          supplier: entry.supplier.name,
+          quantity: dec(entry.quantity).toString(),
+          unit: entry.unit.code,
+          poNumber: entry.poNumber,
+          invoiceNumber: entry.invoiceNumber,
+        },
+      },
+    });
+  });
+}
+
+/** Undo an entry deletion. It returns to the inspection queue as pending. */
+export async function restoreRawMaterialEntry(actor: Actor, input: unknown) {
+  assertCan(actor, "rm.entry.delete");
+  const data = parse(z.object({ entryId: requiredText(50, "Entry"), reason: requiredText(1000, "Reason for restoring") }), input);
+  return withTransaction(async (tx) => {
+    const entry = await tx.rawMaterialEntry.findUnique({ where: { id: data.entryId } });
+    if (!entry) throw new NotFoundError("Raw material entry");
+    const updated = await tx.rawMaterialEntry.updateMany({
+      where: { id: entry.id, deletedAt: { not: null } },
+      data: { deletedAt: null, deletedById: null, deleteReason: null },
+    });
+    if (updated.count !== 1) throw new ValidationError("This entry is not deleted.");
+    await audit(tx, {
+      actorId: actor.id,
+      action: "raw_entry.restore",
+      entityType: "RawMaterialEntry",
+      entityId: entry.id,
+      summary: `Restored ${entry.entryNo} to pending inspection: ${data.reason}`,
+      details: { reason: data.reason, previousDeleteReason: entry.deleteReason },
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Inspection
 // ---------------------------------------------------------------------------
@@ -177,7 +352,7 @@ export async function approveEntry(actor: Actor, input: unknown) {
     // The conditional update is the idempotency guard: only one request can
     // move an entry out of PENDING_INSPECTION.
     const moved = await tx.rawMaterialEntry.updateMany({
-      where: { id: data.entryId, status: "PENDING_INSPECTION" },
+      where: { id: data.entryId, status: "PENDING_INSPECTION", deletedAt: null },
       data: { status: "APPROVED" },
     });
     if (moved.count !== 1) throw await alreadyDecided(tx, data.entryId);
@@ -212,7 +387,7 @@ export async function rejectEntry(actor: Actor, input: unknown) {
   const data = parse(rejectSchema, input);
   return withTransaction(async (tx) => {
     const moved = await tx.rawMaterialEntry.updateMany({
-      where: { id: data.entryId, status: "PENDING_INSPECTION" },
+      where: { id: data.entryId, status: "PENDING_INSPECTION", deletedAt: null },
       data: { status: "REJECTED" },
     });
     if (moved.count !== 1) throw await alreadyDecided(tx, data.entryId);
@@ -235,6 +410,7 @@ export async function rejectEntry(actor: Actor, input: unknown) {
 async function alreadyDecided(tx: Tx, entryId: string) {
   const entry = await tx.rawMaterialEntry.findUnique({ where: { id: entryId } });
   if (!entry) return new NotFoundError("Raw material entry");
+  if (entry.deletedAt) return new ValidationError("This entry has been deleted and cannot be inspected.");
   return new ValidationError(`This entry has already been ${entry.status === "APPROVED" ? "approved" : "rejected"}.`);
 }
 

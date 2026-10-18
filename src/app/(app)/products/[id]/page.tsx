@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Pencil, Power } from "lucide-react";
+import { ArchiveRestore, Pencil, Power, Trash2 } from "lucide-react";
 import { requirePage } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { can } from "@/server/permissions";
@@ -18,7 +18,8 @@ import { Button } from "@/components/ui/button";
 import { EXPIRY_STATUS } from "@/lib/labels";
 import { dateOnlyString, daysBetween, formatCalendarDate, formatDateTime, todayInTz } from "@/lib/dates";
 import { dec, formatQty, qtyString } from "@/lib/decimal";
-import { setProductActiveAction } from "../actions";
+import { deleteProductAction, restoreProductAction, setProductActiveAction } from "../actions";
+import { AuditTrail } from "@/components/app/audit-trail";
 import { AdjustDialog, DisposeDialog, ReceiveDialog, type BatchOption } from "./stock-dialogs";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -44,9 +45,11 @@ export default async function ProductDetail({
       category: true,
       batches: { orderBy: [{ expiryDate: { sort: "asc", nulls: "last" } }, { receivedDate: "asc" }], include: { balances: true } },
       lowStockAlerts: { orderBy: { triggeredAt: "desc" }, take: 5 },
+      deletedBy: { select: { name: true } },
     },
   });
   if (!product) notFound();
+  const deleted = !!product.deletedAt;
   const s = (await stockSummaries([id], today)).get(id)!;
   const u = product.unit.code;
   const threshold = dec(product.lowStockThreshold);
@@ -82,40 +85,89 @@ export default async function ProductDetail({
         }
         crumbs={[{ label: "Ready Products" }, { label: "Product master", href: "/products" }, { label: product.name }]}
         actions={
-          <>
-            {can(actor, "product.receive") && product.active && (
-              <ReceiveDialog productId={product.id} unit={u} tracksExpiry={product.tracksExpiry} today={today} />
-            )}
-            {can(actor, "product.disposition") && <DisposeDialog unit={u} batches={batchOptions} />}
-            {can(actor, "inventory.adjust") && <AdjustDialog productId={product.id} unit={u} batches={batchOptions} />}
-            {can(actor, "admin.masters") && (
-              <>
-                <Button variant="outline" asChild>
-                  <Link href={`/products/${product.id}/edit`}>
-                    <Pencil /> Edit
-                  </Link>
-                </Button>
-                <ConfirmAction
-                  trigger={
-                    <Button variant="ghost">
-                      <Power /> {product.active ? "Deactivate" : "Activate"}
-                    </Button>
-                  }
-                  title={product.active ? "Deactivate product?" : "Activate product?"}
-                  description={
-                    product.active
-                      ? "Inactive products cannot be dispatched. Stock and history are kept."
-                      : "The product can be dispatched again."
-                  }
-                  fields={{ id: product.id, active: String(!product.active) }}
-                  action={setProductActiveAction}
-                  destructive={product.active}
-                />
-              </>
-            )}
-          </>
+          deleted ? (
+            can(actor, "admin.masters") && (
+              <ConfirmAction
+                trigger={
+                  <Button variant="outline">
+                    <ArchiveRestore /> Restore
+                  </Button>
+                }
+                title={`Restore ${product.name}?`}
+                description={<p>The product returns to the master as active, with its full history.</p>}
+                reasonLabel="Reason for restoring"
+                confirmLabel="Restore product"
+                fields={{ productId: product.id }}
+                action={restoreProductAction}
+              />
+            )
+          ) : (
+            <>
+              {can(actor, "product.receive") && product.active && (
+                <ReceiveDialog productId={product.id} unit={u} tracksExpiry={product.tracksExpiry} today={today} />
+              )}
+              {can(actor, "product.disposition") && <DisposeDialog unit={u} batches={batchOptions} />}
+              {can(actor, "inventory.adjust") && <AdjustDialog productId={product.id} unit={u} batches={batchOptions} />}
+              {can(actor, "admin.masters") && (
+                <>
+                  <Button variant="outline" asChild>
+                    <Link href={`/products/${product.id}/edit`}>
+                      <Pencil /> Edit
+                    </Link>
+                  </Button>
+                  <ConfirmAction
+                    trigger={
+                      <Button variant="ghost">
+                        <Power /> {product.active ? "Deactivate" : "Activate"}
+                      </Button>
+                    }
+                    title={product.active ? "Deactivate product?" : "Activate product?"}
+                    description={
+                      product.active
+                        ? "Inactive products cannot be dispatched. Stock and history are kept."
+                        : "The product can be dispatched again."
+                    }
+                    fields={{ id: product.id, active: String(!product.active) }}
+                    action={setProductActiveAction}
+                    destructive={product.active}
+                  />
+                  <ConfirmAction
+                    trigger={
+                      <Button variant="ghost" className="text-destructive hover:text-destructive">
+                        <Trash2 /> Delete
+                      </Button>
+                    }
+                    title={`Delete ${product.name}?`}
+                    description={
+                      <>
+                        <p>
+                          The product disappears from the product master, stock lists and pickers. Its batches, transactions and reports are
+                          kept, the SKU stays reserved, and it can be restored.
+                        </p>
+                        <p>Deleting is only possible when it holds no stock in any bucket.</p>
+                      </>
+                    }
+                    reasonLabel="Reason for deleting"
+                    confirmLabel="Delete product"
+                    destructive
+                    fields={{ productId: product.id }}
+                    action={deleteProductAction}
+                  />
+                </>
+              )}
+            </>
+          )
         }
       />
+      {deleted && (
+        <div role="status" className="mb-6 rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 text-sm">
+          <p className="font-medium text-red-900">This product was deleted</p>
+          <p className="text-red-900/80">
+            {product.deletedBy?.name} · {formatDateTime(product.deletedAt!, settings.timezone, settings.dateFormat)} —{" "}
+            {product.deleteReason}
+          </p>
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard label="Available" value={formatQty(s.available, u)} hint="Saleable, not expired" tone={low ? "warning" : "default"} />
@@ -240,6 +292,14 @@ export default async function ProductDetail({
           </SectionCard>
         </div>
       </div>
+
+      <SectionCard
+        title="Change history"
+        description="Edits, deletions and stock actions on this product, with old and new values."
+        className="mt-6"
+      >
+        <AuditTrail entityType="ReadyProduct" entityId={product.id} tz={settings.timezone} dateFormat={settings.dateFormat} />
+      </SectionCard>
 
       {can(actor, "product.reports") && (
         <div className="mt-8 space-y-3">

@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Undo2 } from "lucide-react";
+import { ArchiveRestore, Lock, Pencil, Trash2, Undo2 } from "lucide-react";
 import { requirePage } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { can } from "@/server/permissions";
@@ -16,7 +17,7 @@ import { ENTRY_STATUS, RAW_TXN_TYPE } from "@/lib/labels";
 import { formatDateTime } from "@/lib/dates";
 import { formatQty } from "@/lib/decimal";
 import { InspectionPanel } from "../../inspection/inspection-panel";
-import { reverseInspectionAction, uploadRawBillAction } from "../../actions";
+import { deleteEntryAction, restoreEntryAction, reverseInspectionAction, uploadRawBillAction } from "../../actions";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const row = await prisma.rawMaterialEntry.findUnique({ where: { id: (await params).id }, select: { entryNo: true } });
@@ -34,6 +35,7 @@ export default async function EntryDetail({ params }: { params: Promise<{ id: st
       supplier: true,
       unit: true,
       createdBy: { select: { name: true } },
+      deletedBy: { select: { name: true } },
       inspections: {
         orderBy: { inspectedAt: "desc" },
         include: { inspectedBy: { select: { name: true } }, reversedBy: { select: { name: true } } },
@@ -47,6 +49,7 @@ export default async function EntryDetail({ params }: { params: Promise<{ id: st
   const df = settings.dateFormat;
   const canBills = can(actor, "rm.bills") || can(actor, "rm.inspect");
   const active = entry.inspections.find((i) => !i.reversedAt);
+  const editable = !entry.deletedAt && entry.status === "PENDING_INSPECTION";
 
   return (
     <>
@@ -54,8 +57,74 @@ export default async function EntryDetail({ params }: { params: Promise<{ id: st
         title={entry.entryNo}
         description={`${formatQty(entry.quantity, entry.unit.code)} of ${entry.rawMaterial.name} from ${entry.supplier.name}`}
         crumbs={[{ label: "Raw Materials" }, { label: "Material entries", href: "/raw-materials/entries" }, { label: entry.entryNo }]}
-        actions={<Pill map={ENTRY_STATUS} value={entry.status} />}
+        actions={
+          <>
+            {entry.deletedAt ? <StatusBadge tone="muted">Deleted</StatusBadge> : <Pill map={ENTRY_STATUS} value={entry.status} />}
+            {editable && can(actor, "rm.entry.edit") && (
+              <Button variant="outline" asChild>
+                <Link href={`/raw-materials/entries/${entry.id}/edit`}>
+                  <Pencil /> Edit
+                </Link>
+              </Button>
+            )}
+            {editable && can(actor, "rm.entry.delete") && (
+              <ConfirmAction
+                trigger={
+                  <Button variant="outline" className="text-destructive hover:text-destructive">
+                    <Trash2 /> Delete
+                  </Button>
+                }
+                title={`Delete ${entry.entryNo}?`}
+                description={
+                  <p>
+                    The entry is removed from lists, counts and the inspection queue. No stock was posted for it. It stays on record with
+                    your reason in the audit trail and can be restored.
+                  </p>
+                }
+                reasonLabel="Reason for deleting"
+                confirmLabel="Delete entry"
+                destructive
+                fields={{ entryId: entry.id }}
+                action={deleteEntryAction}
+              />
+            )}
+            {entry.deletedAt && can(actor, "rm.entry.delete") && (
+              <ConfirmAction
+                trigger={
+                  <Button variant="outline">
+                    <ArchiveRestore /> Restore
+                  </Button>
+                }
+                title={`Restore ${entry.entryNo}?`}
+                description={<p>The entry goes back to the inspection queue as pending.</p>}
+                reasonLabel="Reason for restoring"
+                confirmLabel="Restore entry"
+                fields={{ entryId: entry.id }}
+                action={restoreEntryAction}
+              />
+            )}
+          </>
+        }
       />
+      {!entry.deletedAt && !editable && (can(actor, "rm.entry.edit") || can(actor, "rm.entry.delete")) && (
+        <div role="note" className="mb-6 flex gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+          <Lock className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <p>
+            This entry is locked because it has been {entry.status === "APPROVED" ? "approved and its stock is on the ledger" : "rejected"}.{" "}
+            {can(actor, "inventory.reverse")
+              ? "To correct it, use “Reverse for re-inspection” under Inspection history below; the entry then returns to pending and can be edited or deleted."
+              : "To correct it, ask an administrator to reverse the inspection decision; it then returns to pending and can be edited."}
+          </p>
+        </div>
+      )}
+      {entry.deletedAt && (
+        <div role="status" className="mb-6 rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 text-sm">
+          <p className="font-medium text-red-900">This entry was deleted</p>
+          <p className="text-red-900/80">
+            {entry.deletedBy?.name} · {formatDateTime(entry.deletedAt, tz, df)} — {entry.deleteReason}
+          </p>
+        </div>
+      )}
       <div className="grid gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
           <SectionCard title="Entry details">
@@ -75,7 +144,7 @@ export default async function EntryDetail({ params }: { params: Promise<{ id: st
             />
           </SectionCard>
 
-          {entry.status === "PENDING_INSPECTION" && can(actor, "rm.inspect") && (
+          {editable && can(actor, "rm.inspect") && (
             <SectionCard title="Quality inspection" description="Approving adds the quantity to raw material stock exactly once.">
               <div className="p-4">
                 <InspectionPanel
@@ -185,7 +254,8 @@ export default async function EntryDetail({ params }: { params: Promise<{ id: st
             <SectionCard
               title="Bills and invoices"
               actions={
-                can(actor, "rm.bills") && (
+                can(actor, "rm.bills") &&
+                !entry.deletedAt && (
                   <UploadDialog
                     title="Upload bill"
                     description={`Attach a bill to ${entry.entryNo}.`}

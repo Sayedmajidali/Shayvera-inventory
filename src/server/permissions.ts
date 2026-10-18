@@ -10,6 +10,8 @@ export const PERMISSIONS = {
   // Raw materials
   "rm.view": { label: "View raw material entries and stock", group: "Raw Materials" },
   "rm.entry.create": { label: "Record incoming raw materials", group: "Raw Materials" },
+  "rm.entry.edit": { label: "Edit pending raw material entries", group: "Raw Materials" },
+  "rm.entry.delete": { label: "Delete pending raw material entries", group: "Raw Materials" },
   "rm.inspect": { label: "Approve / reject quality inspections", group: "Raw Materials" },
   "rm.bills": { label: "Upload and view raw material bills", group: "Raw Materials" },
   "rm.reports": { label: "View raw material reports", group: "Raw Materials" },

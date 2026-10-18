@@ -36,6 +36,18 @@ Every report supports search, sorting, pagination, date range and dropdown filte
 | kg and pieces never mix                          | A raw material is keyed by (name, unit); `pieces` only accepts whole numbers; reports group by unit.                                                                              |
 | Decimal-safe                                     | All quantities are `DECIMAL(18,3)` and handled with `Prisma.Decimal`, never JavaScript floats.                                                                                    |
 
+### Editing and deleting records
+
+| Record             | Edit                                                     | Delete                                                               |
+| ------------------ | -------------------------------------------------------- | -------------------------------------------------------------------- |
+| Raw material entry | While **pending inspection** only; a reason is required. | While pending only; a reason is required.                            |
+| Product (master)   | Any time (unit locked once stock exists); optional note. | Only when it holds **no stock** in any bucket; a reason is required. |
+
+- Every edit stores each changed field's old and new value, the user, the time and the reason. These show in the record's **Activity / Change history** and in the audit log.
+- Deletes are **soft**: the record is marked deleted (who, when, why), hidden from lists, counts, stock figures and pickers, and kept for history. Choose **Status → Deleted** in the list to find them, and use **Restore** to undo.
+- Approved or rejected entries are locked because they are part of the stock history. To correct one, an administrator reverses the inspection decision (recorded with a reason). The entry then returns to pending and can be edited, deleted or re-inspected.
+- Permissions: _Edit pending raw material entries_ and _Delete pending raw material entries_ can be granted to staff. Product edits and deletes are administrator-only.
+
 **Dispatch ≠ sale.** "Net sent out" (dispatched − returned) is a stock movement measure. Store-reported sales are recorded separately (no stock impact) and shown beside it for reconciliation.
 
 ## Permissions
@@ -114,7 +126,7 @@ Timestamps are stored in UTC. Business days ("today", report ranges, expiry chec
 npm test
 ```
 
-The suite (54 tests) runs the real services against PostgreSQL. It covers approval-once under concurrent requests, rejection, reversal and re-inspection, immutable ledgers, bill access control, per-product thresholds and expiry periods, batch separation, FEFO, oversell protection under six parallel dispatches, duplicate submissions, return caps under concurrency, return conditions and quarantine decisions, store and date filters, reconciliation, permission enforcement, CSV formula-injection protection, the CSV importer and dashboard totals.
+The suite (65 tests) runs the real services against PostgreSQL. It covers approval-once under concurrent requests, rejection, reversal and re-inspection, immutable ledgers, bill access control, per-product thresholds and expiry periods, batch separation, FEFO, oversell protection under six parallel dispatches, duplicate submissions, return caps under concurrency, return conditions and quarantine decisions, store and date filters, reconciliation, permission enforcement, CSV formula-injection protection, the CSV importer, dashboard totals, and edit/delete rules with their audit trail.
 
 ## Deployment
 
