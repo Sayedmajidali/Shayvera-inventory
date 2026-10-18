@@ -1,0 +1,710 @@
+// Shayvera Inventory Management System — database schema
+//
+// Design principles
+// - Ledger first: every stock change is an immutable row in RawMaterialTransaction
+//   or ProductTransaction. Cached balances (RawMaterial.currentBalance, StockBalance)
+//   are updated in the same database transaction and can be reconciled against
+//   the ledger at any time.
+// - Raw material and ready product inventories are fully separate.
+// - Quantities use DECIMAL(18,3). Never floating point.
+// - Additional CHECK constraints and partial unique indexes live in the SQL
+//   migrations (see prisma/migrations/*_constraints).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Users, sessions, permissions
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(STAFF)
+  // Permission keys granted to STAFF users (ADMIN implicitly has all).
+  permissions  String[]  @default([])
+  active       Boolean   @default(true)
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions  Session[]
+  auditLogs AuditLog[]
+
+  rawEntries          RawMaterialEntry[]       @relation("EntryCreatedBy")
+  inspections         QualityInspection[]      @relation("InspectedBy")
+  inspectionReversals QualityInspection[]      @relation("InspectionReversedBy")
+  rawTransactions     RawMaterialTransaction[]
+  productTransactions ProductTransaction[]
+  adjustments         InventoryAdjustment[]
+  dispatches          Dispatch[]               @relation("DispatchCreatedBy")
+  dispatchReversals   Dispatch[]               @relation("DispatchReversedBy")
+  returns             ProductReturn[]          @relation("ReturnCreatedBy")
+  returnReversals     ProductReturn[]          @relation("ReturnReversedBy")
+  dispositions        QuarantineDisposition[]
+  storeSales          StoreSale[]
+  attachments         BillAttachment[]         @relation("UploadedBy")
+  replacedAttachments BillAttachment[]         @relation("ReplacedBy")
+  batchesCreated      ProductBatch[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userAgent String?
+  ip        String?
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  entityType String
+  entityId   String?
+  summary    String
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@index([actorId])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// Gap-free human readable document numbers (RM-000001, DSP-000001, ...)
+model DocumentSequence {
+  key   String @id
+  value Int    @default(0)
+}
+
+// ---------------------------------------------------------------------------
+// Masters
+// ---------------------------------------------------------------------------
+
+model Unit {
+  id            String   @id @default(cuid())
+  code          String   @unique // "kg", "pieces"
+  name          String
+  allowsDecimal Boolean  @default(false)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  rawMaterials        RawMaterial[]
+  rawEntries          RawMaterialEntry[]
+  rawTransactions     RawMaterialTransaction[]
+  products            ReadyProduct[]
+  productTransactions ProductTransaction[]
+}
+
+model Supplier {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  gstNumber     String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  entries     RawMaterialEntry[]
+  attachments BillAttachment[]
+
+  @@index([name])
+}
+
+model Store {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  storeType String // marketplace, online shop, warehouse, ...
+  contact   String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dispatches          Dispatch[]
+  returns             ProductReturn[]
+  productTransactions ProductTransaction[]
+  attachments         BillAttachment[]
+  sales               StoreSale[]
+
+  @@index([name])
+}
+
+model ProductCategory {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  products  ReadyProduct[]
+}
+
+// ---------------------------------------------------------------------------
+// Module 1: Raw materials
+// ---------------------------------------------------------------------------
+
+model RawMaterial {
+  id             String   @id @default(cuid())
+  name           String
+  normalizedName String // lower-cased, trimmed; unique together with unit
+  unitId         String
+  unit           Unit     @relation(fields: [unitId], references: [id])
+  // Cached balance. Always equal to SUM(RawMaterialTransaction.quantity).
+  currentBalance Decimal  @default(0) @db.Decimal(18, 3)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  entries      RawMaterialEntry[]
+  transactions RawMaterialTransaction[]
+
+  @@unique([normalizedName, unitId])
+}
+
+enum EntryStatus {
+  PENDING_INSPECTION
+  APPROVED
+  REJECTED
+}
+
+model RawMaterialEntry {
+  id             String      @id @default(cuid())
+  entryNo        String      @unique
+  entryDate      DateTime
+  rawMaterialId  String
+  rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id])
+  supplierId     String
+  supplier       Supplier    @relation(fields: [supplierId], references: [id])
+  quantity       Decimal     @db.Decimal(18, 3)
+  unitId         String
+  unit           Unit        @relation(fields: [unitId], references: [id])
+  poNumber       String?
+  invoiceNumber  String?
+  notes          String?
+  status         EntryStatus @default(PENDING_INSPECTION)
+  idempotencyKey String      @unique
+  createdById    String
+  createdBy      User        @relation("EntryCreatedBy", fields: [createdById], references: [id])
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  inspections  QualityInspection[]
+  transactions RawMaterialTransaction[]
+  attachments  BillAttachment[]
+
+  @@index([status])
+  @@index([entryDate])
+  @@index([supplierId])
+  @@index([rawMaterialId])
+  @@index([invoiceNumber])
+  @@index([poNumber])
+}
+
+enum InspectionDecision {
+  APPROVED
+  REJECTED
+}
+
+// One row per decision. A decision can be reversed (never edited); the entry
+// then returns to PENDING_INSPECTION for re-inspection. At most one
+// non-reversed decision per entry is enforced by a partial unique index.
+model QualityInspection {
+  id              String             @id @default(cuid())
+  entryId         String
+  entry           RawMaterialEntry   @relation(fields: [entryId], references: [id])
+  decision        InspectionDecision
+  notes           String?
+  rejectionReason String?
+  inspectedById   String
+  inspectedBy     User               @relation("InspectedBy", fields: [inspectedById], references: [id])
+  inspectedAt     DateTime           @default(now())
+  reversedAt      DateTime?
+  reversedById    String?
+  reversedBy      User?              @relation("InspectionReversedBy", fields: [reversedById], references: [id])
+  reversalReason  String?
+
+  transactions RawMaterialTransaction[]
+
+  @@index([entryId])
+}
+
+enum RawTxnType {
+  INWARD_APPROVED // stock added after quality approval
+  INSPECTION_REVERSAL // controlled reversal of an approval
+  PRODUCTION_ISSUE // reserved for a future production module
+  ADJUSTMENT // authorized correction
+}
+
+model RawMaterialTransaction {
+  id             String             @id @default(cuid())
+  txnNo          String             @unique
+  type           RawTxnType
+  rawMaterialId  String
+  rawMaterial    RawMaterial        @relation(fields: [rawMaterialId], references: [id])
+  unitId         String
+  unit           Unit               @relation(fields: [unitId], references: [id])
+  // Signed: positive adds stock, negative removes it.
+  quantity       Decimal            @db.Decimal(18, 3)
+  balanceAfter   Decimal            @db.Decimal(18, 3)
+  entryId        String?
+  entry          RawMaterialEntry?  @relation(fields: [entryId], references: [id])
+  inspectionId   String?
+  inspection     QualityInspection? @relation(fields: [inspectionId], references: [id])
+  reference      String?
+  reason         String?
+  idempotencyKey String?            @unique
+  createdById    String
+  createdBy      User               @relation(fields: [createdById], references: [id])
+  createdAt      DateTime           @default(now())
+
+  // One posting per (inspection, type): approval can never add stock twice and
+  // its reversal can never be posted twice.
+  @@unique([inspectionId, type])
+  @@index([rawMaterialId, createdAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Module 2: Ready products
+// ---------------------------------------------------------------------------
+
+model ReadyProduct {
+  id                String           @id @default(cuid())
+  productCode       String           @unique
+  name              String
+  sku               String           @unique
+  barcode           String?          @unique
+  categoryId        String?
+  category          ProductCategory? @relation(fields: [categoryId], references: [id])
+  unitId            String
+  unit              Unit             @relation(fields: [unitId], references: [id])
+  lowStockThreshold Decimal          @default(0) @db.Decimal(18, 3)
+  expiryAlertDays   Int              @default(30)
+  tracksExpiry      Boolean          @default(true)
+  description       String?
+  imageAttachmentId String?          @unique
+  imageAttachment   BillAttachment?  @relation("ProductImage", fields: [imageAttachmentId], references: [id])
+  active            Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  batches        ProductBatch[]
+  balances       StockBalance[]
+  transactions   ProductTransaction[]
+  adjustments    InventoryAdjustment[]
+  dispatchLines  DispatchLine[]
+  returnLines    ProductReturnLine[]
+  lowStockAlerts LowStockAlert[]
+  sales          StoreSale[]
+
+  @@index([name])
+  @@index([categoryId])
+}
+
+model ProductBatch {
+  id           String       @id @default(cuid())
+  batchNo      String
+  productId    String
+  product      ReadyProduct @relation(fields: [productId], references: [id])
+  receivedDate DateTime     @db.Date
+  expiryDate   DateTime?    @db.Date
+  initialQty   Decimal      @db.Decimal(18, 3)
+  notes        String?
+  createdById  String
+  createdBy    User         @relation(fields: [createdById], references: [id])
+  createdAt    DateTime     @default(now())
+
+  balances     StockBalance[]
+  transactions ProductTransaction[]
+  allocations  DispatchAllocation[]
+  adjustments  InventoryAdjustment[]
+
+  @@unique([productId, batchNo])
+  @@index([expiryDate])
+}
+
+enum StockBucket {
+  SALEABLE
+  QUARANTINE
+  DAMAGED
+  EXPIRED
+}
+
+// Cached quantity per (batch, bucket). CHECK (quantity >= 0) in SQL.
+// Always equal to SUM(ProductTransaction.quantity) for the same batch/bucket.
+model StockBalance {
+  id        String       @id @default(cuid())
+  productId String
+  product   ReadyProduct @relation(fields: [productId], references: [id])
+  batchId   String
+  batch     ProductBatch @relation(fields: [batchId], references: [id])
+  bucket    StockBucket
+  quantity  Decimal      @default(0) @db.Decimal(18, 3)
+  updatedAt DateTime     @updatedAt
+
+  @@unique([batchId, bucket])
+  @@index([productId, bucket])
+}
+
+enum ProductTxnType {
+  OPENING
+  RECEIPT // new stock / batch received (e.g. from manufacturing)
+  PRODUCTION_RECEIPT // reserved for a future production module
+  ADJUSTMENT
+  DISPATCH
+  RETURN
+  DISPOSITION // quarantine -> saleable / damaged / expired
+  REVERSAL
+}
+
+model ProductTransaction {
+  id             String                 @id @default(cuid())
+  txnNo          String                 @unique
+  type           ProductTxnType
+  productId      String
+  product        ReadyProduct           @relation(fields: [productId], references: [id])
+  batchId        String
+  batch          ProductBatch           @relation(fields: [batchId], references: [id])
+  bucket         StockBucket
+  unitId         String
+  unit           Unit                   @relation(fields: [unitId], references: [id])
+  // Signed: positive adds to the bucket, negative removes from it.
+  quantity       Decimal                @db.Decimal(18, 3)
+  storeId        String?
+  store          Store?                 @relation(fields: [storeId], references: [id])
+  dispatchId     String?
+  dispatch       Dispatch?              @relation(fields: [dispatchId], references: [id])
+  returnId       String?
+  productReturn  ProductReturn?         @relation(fields: [returnId], references: [id])
+  adjustmentId   String?
+  adjustment     InventoryAdjustment?   @relation(fields: [adjustmentId], references: [id])
+  dispositionId  String?
+  disposition    QuarantineDisposition? @relation(fields: [dispositionId], references: [id])
+  reversalOfId   String?                @unique
+  reversalOf     ProductTransaction?    @relation("TxnReversal", fields: [reversalOfId], references: [id])
+  reversedBy     ProductTransaction?    @relation("TxnReversal")
+  reference      String?
+  notes          String?
+  // Set on single-transaction documents (stock receipts) to block double posting.
+  idempotencyKey String?                @unique
+  createdById    String
+  createdBy      User                   @relation(fields: [createdById], references: [id])
+  createdAt      DateTime               @default(now())
+
+  @@index([productId, createdAt])
+  @@index([storeId, createdAt])
+  @@index([type, createdAt])
+  @@index([createdAt])
+  @@index([dispatchId])
+  @@index([returnId])
+}
+
+model InventoryAdjustment {
+  id             String       @id @default(cuid())
+  adjustmentNo   String       @unique
+  productId      String
+  product        ReadyProduct @relation(fields: [productId], references: [id])
+  batchId        String
+  batch          ProductBatch @relation(fields: [batchId], references: [id])
+  bucket         StockBucket
+  quantityDelta  Decimal      @db.Decimal(18, 3)
+  reason         String
+  idempotencyKey String       @unique
+  createdById    String
+  createdBy      User         @relation(fields: [createdById], references: [id])
+  createdAt      DateTime     @default(now())
+
+  transactions ProductTransaction[]
+
+  @@index([createdAt])
+}
+
+enum AlertStatus {
+  OPEN
+  RESOLVED
+}
+
+// Low-stock alerts are opened/resolved inside stock-changing transactions,
+// never on page load. A partial unique index allows only one OPEN alert per product.
+model LowStockAlert {
+  id           String       @id @default(cuid())
+  productId    String
+  product      ReadyProduct @relation(fields: [productId], references: [id])
+  status       AlertStatus  @default(OPEN)
+  availableQty Decimal      @db.Decimal(18, 3)
+  threshold    Decimal      @db.Decimal(18, 3)
+  triggeredAt  DateTime     @default(now())
+  resolvedAt   DateTime?
+
+  @@index([status])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Module 3: E-commerce
+// ---------------------------------------------------------------------------
+
+enum DocStatus {
+  POSTED
+  REVERSED
+}
+
+model Dispatch {
+  id             String    @id @default(cuid())
+  dispatchNo     String    @unique
+  dispatchDate   DateTime
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id])
+  orderRef       String?
+  invoiceNumber  String?
+  notes          String?
+  status         DocStatus @default(POSTED)
+  idempotencyKey String    @unique
+  createdById    String
+  createdBy      User      @relation("DispatchCreatedBy", fields: [createdById], references: [id])
+  createdAt      DateTime  @default(now())
+  reversedAt     DateTime?
+  reversedById   String?
+  reversedBy     User?     @relation("DispatchReversedBy", fields: [reversedById], references: [id])
+  reversalReason String?
+
+  lines        DispatchLine[]
+  returns      ProductReturn[]
+  transactions ProductTransaction[]
+  attachments  BillAttachment[]
+
+  @@index([dispatchDate])
+  @@index([storeId, dispatchDate])
+  @@index([invoiceNumber])
+  @@index([orderRef])
+}
+
+model DispatchLine {
+  id          String       @id @default(cuid())
+  dispatchId  String
+  dispatch    Dispatch     @relation(fields: [dispatchId], references: [id])
+  lineNo      Int
+  productId   String
+  product     ReadyProduct @relation(fields: [productId], references: [id])
+  quantity    Decimal      @db.Decimal(18, 3)
+  // Cached cumulative returned quantity. CHECK (returnedQty <= quantity) in SQL.
+  returnedQty Decimal      @default(0) @db.Decimal(18, 3)
+
+  allocations DispatchAllocation[]
+  returnLines ProductReturnLine[]
+
+  @@unique([dispatchId, lineNo])
+  @@index([productId])
+}
+
+// Which batches a dispatch line was fulfilled from (FEFO or explicitly chosen).
+model DispatchAllocation {
+  id          String       @id @default(cuid())
+  lineId      String
+  line        DispatchLine @relation(fields: [lineId], references: [id])
+  batchId     String
+  batch       ProductBatch @relation(fields: [batchId], references: [id])
+  quantity    Decimal      @db.Decimal(18, 3)
+  returnedQty Decimal      @default(0) @db.Decimal(18, 3)
+
+  returnAllocations ProductReturnAllocation[]
+
+  @@unique([lineId, batchId])
+}
+
+enum ReturnCondition {
+  SALEABLE
+  DAMAGED
+  EXPIRED
+  PENDING_INSPECTION
+}
+
+model ProductReturn {
+  id             String    @id @default(cuid())
+  returnNo       String    @unique
+  returnDate     DateTime
+  storeId        String
+  store          Store     @relation(fields: [storeId], references: [id])
+  dispatchId     String
+  dispatch       Dispatch  @relation(fields: [dispatchId], references: [id])
+  reason         String
+  notes          String?
+  status         DocStatus @default(POSTED)
+  idempotencyKey String    @unique
+  createdById    String
+  createdBy      User      @relation("ReturnCreatedBy", fields: [createdById], references: [id])
+  createdAt      DateTime  @default(now())
+  reversedAt     DateTime?
+  reversedById   String?
+  reversedBy     User?     @relation("ReturnReversedBy", fields: [reversedById], references: [id])
+  reversalReason String?
+
+  lines        ProductReturnLine[]
+  transactions ProductTransaction[]
+  attachments  BillAttachment[]
+
+  @@index([returnDate])
+  @@index([storeId, returnDate])
+  @@index([dispatchId])
+}
+
+model ProductReturnLine {
+  id             String          @id @default(cuid())
+  returnId       String
+  productReturn  ProductReturn   @relation(fields: [returnId], references: [id])
+  dispatchLineId String
+  dispatchLine   DispatchLine    @relation(fields: [dispatchLineId], references: [id])
+  productId      String
+  product        ReadyProduct    @relation(fields: [productId], references: [id])
+  quantity       Decimal         @db.Decimal(18, 3)
+  condition      ReturnCondition
+  notes          String?
+
+  allocations  ProductReturnAllocation[]
+  dispositions QuarantineDisposition[]
+
+  @@index([dispatchLineId])
+  @@index([productId])
+}
+
+model ProductReturnAllocation {
+  id                   String             @id @default(cuid())
+  returnLineId         String
+  returnLine           ProductReturnLine  @relation(fields: [returnLineId], references: [id])
+  dispatchAllocationId String
+  dispatchAllocation   DispatchAllocation @relation(fields: [dispatchAllocationId], references: [id])
+  quantity             Decimal            @db.Decimal(18, 3)
+
+  @@unique([returnLineId, dispatchAllocationId])
+}
+
+// Authorized decision for quarantined (pending inspection) returned goods.
+model QuarantineDisposition {
+  id             String             @id @default(cuid())
+  dispositionNo  String             @unique
+  returnLineId   String?
+  returnLine     ProductReturnLine? @relation(fields: [returnLineId], references: [id])
+  batchId        String
+  toBucket       StockBucket
+  quantity       Decimal            @db.Decimal(18, 3)
+  notes          String?
+  idempotencyKey String             @unique
+  createdById    String
+  createdBy      User               @relation(fields: [createdById], references: [id])
+  createdAt      DateTime           @default(now())
+
+  transactions ProductTransaction[]
+}
+
+// Sales reported by a store/marketplace. Informational: no Shayvera stock
+// impact (the goods already left via a dispatch). Used for reconciliation.
+model StoreSale {
+  id             String       @id @default(cuid())
+  saleNo         String       @unique
+  saleDate       DateTime
+  storeId        String
+  store          Store        @relation(fields: [storeId], references: [id])
+  productId      String
+  product        ReadyProduct @relation(fields: [productId], references: [id])
+  quantity       Decimal      @db.Decimal(18, 3)
+  reference      String?
+  notes          String?
+  idempotencyKey String       @unique
+  createdById    String
+  createdBy      User         @relation(fields: [createdById], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@index([storeId, saleDate])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Documents (bills, invoices, shipment and return documents, product images)
+// ---------------------------------------------------------------------------
+
+enum AttachmentCategory {
+  RAW_MATERIAL_BILL
+  DISPATCH_BILL
+  SHIPMENT_DOCUMENT
+  RETURN_DOCUMENT
+  PRODUCT_IMAGE
+}
+
+enum AttachmentStatus {
+  ACTIVE
+  REPLACED
+}
+
+model BillAttachment {
+  id                 String             @id @default(cuid())
+  category           AttachmentCategory
+  fileName           String
+  mimeType           String
+  sizeBytes          Int
+  sha256             String
+  storageKey         String             @unique // private storage reference, never a public URL
+  billNumber         String?
+  notes              String?
+  status             AttachmentStatus   @default(ACTIVE)
+  supplierId         String?
+  supplier           Supplier?          @relation(fields: [supplierId], references: [id])
+  storeId            String?
+  store              Store?             @relation(fields: [storeId], references: [id])
+  rawMaterialEntryId String?
+  rawMaterialEntry   RawMaterialEntry?  @relation(fields: [rawMaterialEntryId], references: [id])
+  dispatchId         String?
+  dispatch           Dispatch?          @relation(fields: [dispatchId], references: [id])
+  returnId           String?
+  productReturn      ProductReturn?     @relation(fields: [returnId], references: [id])
+  replacesId         String?            @unique
+  replaces           BillAttachment?    @relation("Replacement", fields: [replacesId], references: [id])
+  replacedBy         BillAttachment?    @relation("Replacement")
+  replacementReason  String?
+  replacedAt         DateTime?
+  replacedById       String?
+  replacedByUser     User?              @relation("ReplacedBy", fields: [replacedById], references: [id])
+  uploadedById       String
+  uploadedBy         User               @relation("UploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt         DateTime           @default(now())
+
+  productImageOf ReadyProduct? @relation("ProductImage")
+
+  @@index([category, uploadedAt])
+  @@index([rawMaterialEntryId])
+  @@index([dispatchId])
+  @@index([returnId])
+  @@index([storeId])
+  @@index([supplierId])
+  @@index([billNumber])
+}
