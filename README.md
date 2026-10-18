@@ -14,7 +14,8 @@ Inventory management for Shayvera: raw materials with quality inspection, ready 
 | **Raw Materials**  | Material entries (with bill upload), quality inspection queue (approve / reject / controlled reversal), raw material stock and per-material ledger, bill register, 10 reports.                                                                                       |
 | **Ready Products** | Product master (per-product low-stock threshold and expiry alert period), product detail with batches per stock bucket, stock receipts, admin adjustments, quarantine decisions, stock overview, alerts (low stock / expiry / quarantine), 7 reports.                |
 | **E-commerce**     | Stores, multi-line dispatches (FEFO batch allocation or a chosen batch), returns with condition, store-reported sales, unified transaction history, document register, 10 reports including reconciliation.                                                          |
-| **Administration** | Users, roles and per-user permissions, suppliers, business settings (timezone, date format, upload limits and file types, expired-dispatch exception), units, categories, CSV import, audit log.                                                                     |
+| **Master Data**    | One place to set up the lists everything else uses: an overview with counts and quick-add for each, plus Products, Raw materials (pre-defined so staff pick instead of typing), Suppliers, Stores, Units and Categories.                                             |
+| **Administration** | Users, roles and per-user permissions, business settings (timezone, date format, upload limits and file types, expired-dispatch exception), CSV import, audit log.                                                                                                   |
 
 Every report supports search, sorting, pagination, date range and dropdown filters, CSV export (with the applied filters written into the file) and a print layout.
 
@@ -126,7 +127,7 @@ Timestamps are stored in UTC. Business days ("today", report ranges, expiry chec
 npm test
 ```
 
-The suite (66 tests) runs the real services against PostgreSQL. It covers approval-once under concurrent requests, rejection, reversal and re-inspection, immutable ledgers, bill access control, per-product thresholds and expiry periods, batch separation, FEFO, oversell protection under six parallel dispatches, duplicate submissions, return caps under concurrency, return conditions and quarantine decisions, store and date filters, reconciliation, permission enforcement, CSV formula-injection protection, the CSV importer, dashboard totals, and edit/delete rules with their audit trail.
+The suite (71 tests) runs the real services against PostgreSQL. It covers approval-once under concurrent requests, rejection, reversal and re-inspection, immutable ledgers, bill access control, per-product thresholds and expiry periods, batch separation, FEFO, oversell protection under six parallel dispatches, duplicate submissions, return caps under concurrency, return conditions and quarantine decisions, store and date filters, reconciliation, permission enforcement, CSV formula-injection protection, the CSV importer, dashboard totals, and edit/delete rules with their audit trail.
 
 ## Deploying to Netlify
 

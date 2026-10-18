@@ -16,7 +16,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       <PageHeader
         title="Product master"
         description="Finished products ready for sale, each with its own low-stock threshold and expiry alert period."
-        crumbs={[{ label: "Ready Products" }, { label: "Product master" }]}
+        crumbs={[{ label: "Master Data", href: "/masters" }, { label: "Products" }]}
         actions={
           can(actor, "admin.masters") && (
             <Button asChild>

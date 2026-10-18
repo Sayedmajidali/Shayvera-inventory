@@ -106,7 +106,7 @@ export function DispatchForm({
             error={fieldErrors.storeId}
             hint={
               stores.length === 0 ? (
-                <Link className="text-primary underline" href="/ecommerce/stores">
+                <Link className="text-primary underline" href="/masters/stores">
                   Create a store first
                 </Link>
               ) : undefined

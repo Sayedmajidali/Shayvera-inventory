@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/app/empty-state";
 import { StatusBadge } from "@/components/app/status-badge";
 import { ConfirmAction } from "@/components/forms/confirm-action";
 import { Button } from "@/components/ui/button";
-import { setStoreActiveAction } from "../actions";
+import { setStoreActiveAction } from "@/app/(app)/ecommerce/actions";
 import { StoreDialog } from "./store-dialog";
 
 export const metadata = { title: "Stores" };
@@ -34,7 +34,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
       <PageHeader
         title="Stores"
         description="Sales channels that receive Shayvera stock."
-        crumbs={[{ label: "E-commerce" }, { label: "Stores" }]}
+        crumbs={[{ label: "Master Data", href: "/masters" }, { label: "Stores" }]}
         actions={manage && <StoreDialog />}
       />
       <form className="no-print mb-4 flex gap-2" role="search">

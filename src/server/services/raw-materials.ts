@@ -20,6 +20,11 @@ async function findOrCreateMaterial(tx: Tx, name: string, unitId: string) {
   const clean = name.trim().replace(/\s+/g, " ");
   const normalizedName = normalizeName(clean);
   const existing = await tx.rawMaterial.findUnique({ where: { normalizedName_unitId: { normalizedName, unitId } } });
+  if (existing && !existing.active) {
+    throw new ValidationError(`${existing.name} is deactivated in the raw material master. Reactivate it or choose another material.`, {
+      materialName: "Deactivated material",
+    });
+  }
   if (existing) return existing;
   // ON CONFLICT makes two first-time entries for the same material safe to race.
   await tx.$executeRaw`
@@ -68,6 +73,103 @@ async function postRawTransaction(
       idempotencyKey: args.idempotencyKey ?? null,
       createdById: actor.id,
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Raw material master
+// ---------------------------------------------------------------------------
+
+const materialSchema = z.object({
+  name: requiredText(150, "Material name"),
+  unitId: requiredText(50, "Unit"),
+});
+
+function duplicateMaterial(e: unknown) {
+  return isUniqueViolation(e)
+    ? new ValidationError("A material with this name and unit already exists.", { name: "Already exists for this unit" })
+    : null;
+}
+
+/** Add a material to the master so it can be picked when recording entries. */
+export async function createRawMaterial(actor: Actor, input: unknown) {
+  assertCan(actor, "admin.masters");
+  const data = parse(materialSchema, input);
+  const unit = await prisma.unit.findUnique({ where: { id: data.unitId } });
+  if (!unit || !unit.active) throw new ValidationError("Select an active unit.", { unitId: "Select an active unit" });
+  const name = data.name.replace(/\s+/g, " ");
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const m = await tx.rawMaterial.create({ data: { name, normalizedName: normalizeName(name), unitId: unit.id } });
+      await audit(tx, {
+        actorId: actor.id,
+        action: "raw_material.create",
+        entityType: "RawMaterial",
+        entityId: m.id,
+        summary: `Added raw material ${m.name} (${unit.code}) to the master`,
+      });
+      return m;
+    });
+  } catch (e) {
+    throw duplicateMaterial(e) ?? e;
+  }
+}
+
+/** Rename a material; the unit can only change while nothing has been recorded against it. */
+export async function updateRawMaterial(actor: Actor, id: string, input: unknown) {
+  assertCan(actor, "admin.masters");
+  const data = parse(materialSchema, input);
+  const name = data.name.replace(/\s+/g, " ");
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const before = await tx.rawMaterial.findUnique({
+        where: { id },
+        include: { unit: true, _count: { select: { entries: true, transactions: true } } },
+      });
+      if (!before) throw new NotFoundError("Raw material");
+      const unit = await tx.unit.findUnique({ where: { id: data.unitId } });
+      if (!unit) throw new ValidationError("Select a unit.", { unitId: "Select a unit" });
+      if (unit.id !== before.unitId && (before._count.entries > 0 || before._count.transactions > 0)) {
+        throw new ValidationError(
+          "The unit can't change once entries exist for this material. Add a new material with the other unit instead.",
+          {
+            unitId: "Locked after first entry",
+          },
+        );
+      }
+      const changes = diffFields([
+        { field: "name", label: "Name", from: before.name, to: name },
+        { field: "unit", label: "Unit", from: before.unit.code, to: unit.code },
+      ]);
+      if (changes.length === 0) throw new ValidationError("Nothing was changed.");
+      const m = await tx.rawMaterial.update({ where: { id }, data: { name, normalizedName: normalizeName(name), unitId: unit.id } });
+      await audit(tx, {
+        actorId: actor.id,
+        action: "raw_material.update",
+        entityType: "RawMaterial",
+        entityId: id,
+        summary: `Edited raw material ${m.name}: ${describeChanges(changes)}`,
+        details: { changes: changes as unknown as Prisma.InputJsonValue },
+      });
+      return m;
+    });
+  } catch (e) {
+    throw duplicateMaterial(e) ?? e;
+  }
+}
+
+export async function setRawMaterialActive(actor: Actor, id: string, active: boolean) {
+  assertCan(actor, "admin.masters");
+  return prisma.$transaction(async (tx) => {
+    const m = await tx.rawMaterial.update({ where: { id }, data: { active }, include: { unit: true } });
+    await audit(tx, {
+      actorId: actor.id,
+      action: active ? "raw_material.activate" : "raw_material.deactivate",
+      entityType: "RawMaterial",
+      entityId: id,
+      summary: `${active ? "Activated" : "Deactivated"} raw material ${m.name} (${m.unit.code})`,
+    });
+    return m;
   });
 }
 

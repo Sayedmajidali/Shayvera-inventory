@@ -21,8 +21,8 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
       <PageHeader
         title={`Edit ${p.name}`}
         crumbs={[
-          { label: "Ready Products" },
-          { label: "Product master", href: "/products" },
+          { label: "Master Data", href: "/masters" },
+          { label: "Products", href: "/products" },
           { label: p.name, href: `/products/${p.id}` },
           { label: "Edit" },
         ]}

@@ -16,13 +16,13 @@ export async function saveStoreAction(fd: FormData) {
       if (o.id) await updateStore(actor, o.id, o);
       else await createStore(actor, o);
     },
-    { revalidate: ["/ecommerce"], message: "Store saved" },
+    { revalidate: ["/masters", "/ecommerce"], message: "Store saved" },
   );
 }
 
 export async function setStoreActiveAction(fd: FormData) {
   return act((actor) => setStoreActive(actor, String(fd.get("id")), fd.get("active") === "true").then(() => undefined), {
-    revalidate: ["/ecommerce"],
+    revalidate: ["/masters", "/ecommerce"],
     message: "Store status updated",
   });
 }

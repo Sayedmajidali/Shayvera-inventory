@@ -3,7 +3,7 @@
 import Link from "@/components/app/fast-link";
 import { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, ChevronDown, FlaskConical, LayoutDashboard, Settings2, Store } from "lucide-react";
+import { Boxes, ChevronDown, Database, FlaskConical, LayoutDashboard, Settings2, Store } from "lucide-react";
 import { useState } from "react";
 import type { NavSection } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -23,9 +23,11 @@ function PendingDot() {
   );
 }
 
-const ICONS = { dashboard: LayoutDashboard, raw: FlaskConical, product: Boxes, ecom: Store, admin: Settings2 };
+const ICONS = { dashboard: LayoutDashboard, masters: Database, raw: FlaskConical, product: Boxes, ecom: Store, admin: Settings2 };
 
 function isActive(pathname: string, href: string) {
+  // The Master Data overview is only "current" on its own page, not on its sub-pages.
+  if (href === "/masters") return pathname === "/masters";
   // Product Master owns /products and /products/<id>, but not the sibling sections.
   if (href === "/products") return pathname === "/products" || /^\/products\/(?!stock|alerts|reports)[^/]+/.test(pathname);
   return pathname === href || pathname.startsWith(href + "/");

@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSubmit } from "@/components/forms/use-submit";
-import { createCategoryAction, createUnitAction } from "../actions";
+import { createCategoryAction, createUnitAction } from "@/app/(app)/admin/actions";
 
 export function AddUnitForm() {
   const ref = useRef<HTMLFormElement>(null);

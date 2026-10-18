@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/app/empty-state";
 import { StatusBadge } from "@/components/app/status-badge";
 import { ConfirmAction } from "@/components/forms/confirm-action";
 import { Button } from "@/components/ui/button";
-import { setSupplierActiveAction } from "../actions";
+import { setSupplierActiveAction } from "@/app/(app)/admin/actions";
 import { SupplierDialog } from "./supplier-dialog";
 
 export const metadata = { title: "Suppliers" };
@@ -32,7 +32,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
       <PageHeader
         title="Suppliers"
         description="Supplier master for incoming raw materials."
-        crumbs={[{ label: "Administration" }, { label: "Suppliers" }]}
+        crumbs={[{ label: "Master Data", href: "/masters" }, { label: "Suppliers" }]}
         actions={<SupplierDialog />}
       />
       <form className="no-print mb-4 flex gap-2" role="search">

@@ -8,7 +8,7 @@ export interface NavItem {
 
 export interface NavSection {
   label: string;
-  icon: "dashboard" | "raw" | "product" | "ecom" | "admin";
+  icon: "dashboard" | "masters" | "raw" | "product" | "ecom" | "admin";
   href?: string;
   permission?: Permission[];
   items?: NavItem[];
@@ -16,6 +16,19 @@ export interface NavSection {
 
 export const NAV: NavSection[] = [
   { label: "Dashboard", icon: "dashboard", href: "/dashboard", permission: ["dashboard.view"] },
+  {
+    label: "Master Data",
+    icon: "masters",
+    items: [
+      { label: "Overview", href: "/masters", permission: ["admin.masters", "product.view", "ecom.view", "rm.view"] },
+      { label: "Products", href: "/products", permission: ["product.view"] },
+      { label: "Raw Materials", href: "/masters/raw-materials", permission: ["admin.masters", "rm.view"] },
+      { label: "Suppliers", href: "/masters/suppliers", permission: ["admin.masters"] },
+      { label: "Stores", href: "/masters/stores", permission: ["ecom.view"] },
+      { label: "Units", href: "/masters/units", permission: ["admin.masters"] },
+      { label: "Categories", href: "/masters/categories", permission: ["admin.masters"] },
+    ],
+  },
   {
     label: "Raw Materials",
     icon: "raw",
@@ -31,7 +44,6 @@ export const NAV: NavSection[] = [
     label: "Ready Products",
     icon: "product",
     items: [
-      { label: "Product Master", href: "/products", permission: ["product.view"] },
       { label: "Stock Overview", href: "/products/stock", permission: ["product.view"] },
       { label: "Alerts", href: "/products/alerts", permission: ["product.view"] },
       { label: "Reports", href: "/products/reports", permission: ["product.reports"] },
@@ -41,7 +53,6 @@ export const NAV: NavSection[] = [
     label: "E-commerce",
     icon: "ecom",
     items: [
-      { label: "Stores", href: "/ecommerce/stores", permission: ["ecom.view"] },
       { label: "Dispatch / Sales", href: "/ecommerce/dispatches", permission: ["ecom.view", "ecom.dispatch"] },
       { label: "Returns", href: "/ecommerce/returns", permission: ["ecom.view", "ecom.return"] },
       { label: "Transaction History", href: "/ecommerce/transactions", permission: ["ecom.view"] },
@@ -54,8 +65,7 @@ export const NAV: NavSection[] = [
     icon: "admin",
     items: [
       { label: "Users and Roles", href: "/admin/users", permission: ["admin.users"] },
-      { label: "Suppliers", href: "/admin/suppliers", permission: ["admin.masters"] },
-      { label: "Settings", href: "/admin/settings", permission: ["admin.settings", "admin.masters"] },
+      { label: "Settings", href: "/admin/settings", permission: ["admin.settings"] },
       { label: "Audit Log", href: "/admin/audit", permission: ["admin.audit"] },
     ],
   },

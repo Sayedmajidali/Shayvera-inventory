@@ -50,13 +50,13 @@ export async function saveSupplierAction(fd: FormData) {
       if (o.id) await updateSupplier(actor, o.id, o);
       else await createSupplier(actor, o);
     },
-    { revalidate: ["/admin", "/raw-materials"], message: "Supplier saved" },
+    { revalidate: ["/masters", "/raw-materials"], message: "Supplier saved" },
   );
 }
 
 export async function setSupplierActiveAction(fd: FormData) {
   return act((actor) => setSupplierActive(actor, String(fd.get("id")), fd.get("active") === "true").then(() => undefined), {
-    revalidate: ["/admin"],
+    revalidate: ["/masters"],
     message: "Supplier status updated",
   });
 }
@@ -76,28 +76,28 @@ export async function saveSettingsAction(fd: FormData) {
 
 export async function createUnitAction(fd: FormData) {
   return act((actor) => createUnit(actor, { ...formObject(fd), allowsDecimal: formBool(fd, "allowsDecimal") }).then(() => undefined), {
-    revalidate: ["/admin"],
+    revalidate: ["/masters", "/admin"],
     message: "Unit added",
   });
 }
 
 export async function setUnitActiveAction(fd: FormData) {
   return act((actor) => setUnitActive(actor, String(fd.get("id")), fd.get("active") === "true").then(() => undefined), {
-    revalidate: ["/admin"],
+    revalidate: ["/masters", "/admin"],
     message: "Unit updated",
   });
 }
 
 export async function createCategoryAction(fd: FormData) {
   return act((actor) => createCategory(actor, formObject(fd)).then(() => undefined), {
-    revalidate: ["/admin", "/products"],
+    revalidate: ["/masters", "/products"],
     message: "Category added",
   });
 }
 
 export async function setCategoryActiveAction(fd: FormData) {
   return act((actor) => setCategoryActive(actor, String(fd.get("id")), fd.get("active") === "true").then(() => undefined), {
-    revalidate: ["/admin"],
+    revalidate: ["/masters", "/products"],
     message: "Category updated",
   });
 }
@@ -109,6 +109,6 @@ export async function importCsvAction(fd: FormData) {
       const text = file instanceof File ? await file.text() : "";
       return importCsv(actor, String(fd.get("kind")), text, fd.get("dryRun") === "true");
     },
-    { revalidate: ["/admin", "/products", "/ecommerce"] },
+    { revalidate: ["/masters", "/admin", "/products", "/ecommerce"] },
   );
 }

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FormError } from "@/components/forms/field";
 import { useSubmit } from "@/components/forms/use-submit";
-import { saveSupplierAction } from "../actions";
+import { saveSupplierAction } from "@/app/(app)/admin/actions";
 
 export interface SupplierValues {
   id?: string;

@@ -12,7 +12,7 @@ import {
   updateProduct,
 } from "@/server/services/products";
 
-const PATHS = ["/products", "/dashboard", "/ecommerce"];
+const PATHS = ["/products", "/masters", "/dashboard", "/ecommerce"];
 
 function productInput(fd: FormData) {
   return { ...formObject(fd), tracksExpiry: formBool(fd, "tracksExpiry") };

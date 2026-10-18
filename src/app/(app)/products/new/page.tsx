@@ -15,7 +15,7 @@ export default async function NewProductPage() {
     <>
       <PageHeader
         title="New product"
-        crumbs={[{ label: "Ready Products" }, { label: "Product master", href: "/products" }, { label: "New" }]}
+        crumbs={[{ label: "Master Data", href: "/masters" }, { label: "Products", href: "/products" }, { label: "New" }]}
       />
       <ProductForm units={units} categories={categories} />
     </>

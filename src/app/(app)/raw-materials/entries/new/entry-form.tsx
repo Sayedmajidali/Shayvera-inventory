@@ -83,7 +83,7 @@ export function EntryForm({
           hint={
             suppliers.length === 0 ? (
               canManageSuppliers ? (
-                <Link className="text-primary underline" href="/admin/suppliers">
+                <Link className="text-primary underline" href="/masters/suppliers">
                   Add a supplier first
                 </Link>
               ) : (

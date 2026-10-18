@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FormError } from "@/components/forms/field";
 import { useSubmit } from "@/components/forms/use-submit";
-import { saveStoreAction } from "../actions";
+import { saveStoreAction } from "@/app/(app)/ecommerce/actions";
 
 export interface StoreValues {
   id?: string;

@@ -83,7 +83,7 @@ export default async function ProductDetail({
             {!product.active && <StatusBadge tone="muted">Inactive</StatusBadge>}
           </span>
         }
-        crumbs={[{ label: "Ready Products" }, { label: "Product master", href: "/products" }, { label: product.name }]}
+        crumbs={[{ label: "Master Data", href: "/masters" }, { label: "Products", href: "/products" }, { label: product.name }]}
         actions={
           deleted ? (
             can(actor, "admin.masters") && (
