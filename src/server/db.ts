@@ -3,13 +3,14 @@ import { Prisma, PrismaClient } from "@prisma/client";
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
 /**
- * Connection string for the app. `DATABASE_URL` wins; on Netlify, a connected
- * Netlify DB (Neon) provides `NETLIFY_DATABASE_URL` instead. Neon's pooled
- * endpoint runs PgBouncer in transaction mode, so Prisma is told about it and
- * each serverless function keeps a small pool.
+ * Connection string for the app. `DATABASE_URL` wins; on Netlify, Netlify
+ * Database provides `NETLIFY_DB_URL` (older Netlify DB sites:
+ * `NETLIFY_DATABASE_URL`). Neon's pooled endpoint runs PgBouncer in
+ * transaction mode, so Prisma is told about it and each serverless function
+ * keeps a small pool.
  */
 export function databaseUrl(): string | undefined {
-  const raw = process.env.DATABASE_URL || process.env.NETLIFY_DATABASE_URL;
+  const raw = process.env.DATABASE_URL || process.env.NETLIFY_DB_URL || process.env.NETLIFY_DATABASE_URL;
   if (!raw) return undefined;
   try {
     const url = new URL(raw);

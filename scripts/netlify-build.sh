@@ -3,16 +3,25 @@
 # configured), then build the Next.js app.
 set -euo pipefail
 
-# A connected Netlify DB provides NETLIFY_DATABASE_URL (pooled) and
-# NETLIFY_DATABASE_URL_UNPOOLED (direct). Any other PostgreSQL uses
-# DATABASE_URL, plus DIRECT_DATABASE_URL when DATABASE_URL goes through a pooler.
-APP_DB_URL="${DATABASE_URL:-${NETLIFY_DATABASE_URL:-}}"
+# Database connection, in order of preference:
+#   DATABASE_URL (+ DIRECT_DATABASE_URL if it goes through a pooler)  any PostgreSQL
+#   NETLIFY_DB_URL                                                     Netlify Database
+#   NETLIFY_DATABASE_URL (+ NETLIFY_DATABASE_URL_UNPOOLED)              older Netlify DB (Neon extension)
+if [ -n "${DATABASE_URL:-}" ]; then DB_SOURCE="DATABASE_URL"; APP_DB_URL="$DATABASE_URL"
+elif [ -n "${NETLIFY_DB_URL:-}" ]; then DB_SOURCE="NETLIFY_DB_URL"; APP_DB_URL="$NETLIFY_DB_URL"
+elif [ -n "${NETLIFY_DATABASE_URL:-}" ]; then DB_SOURCE="NETLIFY_DATABASE_URL"; APP_DB_URL="$NETLIFY_DATABASE_URL"
+else DB_SOURCE=""; APP_DB_URL=""
+fi
 MIGRATE_DB_URL="${DIRECT_DATABASE_URL:-${NETLIFY_DATABASE_URL_UNPOOLED:-$APP_DB_URL}}"
+# Migrations need a direct (non-pooled) connection; on Neon that is the same host without "-pooler".
+MIGRATE_DB_URL="${MIGRATE_DB_URL/-pooler./.}"
 
 if [ -z "$MIGRATE_DB_URL" ]; then
-  echo "ERROR: no database configured. Connect Netlify DB to this site, or set DATABASE_URL." >&2
+  echo "ERROR: no database configured. Enable Netlify Database for this site, or set DATABASE_URL." >&2
+  echo "Database-related variables present: $(env | cut -d= -f1 | grep -iE 'DB|DATABASE|POSTGRES|NEON' | tr '\n' ' ')" >&2
   exit 1
 fi
+echo "Using database from $DB_SOURCE"
 SECRET="${SESSION_SECRET:-}"
 if [ "${#SECRET}" -lt 32 ]; then
   echo "ERROR: set SESSION_SECRET (at least 32 random characters) in Site configuration > Environment variables." >&2
