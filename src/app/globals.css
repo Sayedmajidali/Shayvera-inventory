@@ -45,42 +45,46 @@
 }
 
 :root {
-  /* Shayvera brand: deep aubergine with warm champagne accents on a soft ivory canvas */
-  --radius: 0.625rem;
-  --background: oklch(0.985 0.004 85);
-  --foreground: oklch(0.22 0.02 330);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.02 330);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.02 330);
-  --primary: oklch(0.4 0.1 335);
-  --primary-foreground: oklch(0.985 0.005 85);
-  --secondary: oklch(0.955 0.012 330);
-  --secondary-foreground: oklch(0.3 0.06 335);
-  --muted: oklch(0.96 0.006 85);
-  --muted-foreground: oklch(0.5 0.02 330);
-  --accent: oklch(0.95 0.02 335);
-  --accent-foreground: oklch(0.3 0.08 335);
-  --destructive: oklch(0.56 0.2 25);
-  --border: oklch(0.91 0.01 330);
-  --input: oklch(0.89 0.012 330);
-  --ring: oklch(0.55 0.1 335);
-  --gold: oklch(0.76 0.1 75);
-  --success: oklch(0.55 0.12 155);
-  --warning: oklch(0.7 0.14 70);
-  --chart-1: oklch(0.42 0.11 335);
-  --chart-2: oklch(0.72 0.11 75);
-  --chart-3: oklch(0.6 0.09 200);
-  --chart-4: oklch(0.65 0.12 20);
-  --chart-5: oklch(0.55 0.08 150);
-  --sidebar: oklch(0.235 0.045 330);
-  --sidebar-foreground: oklch(0.93 0.01 330);
-  --sidebar-primary: oklch(0.8 0.1 75);
-  --sidebar-primary-foreground: oklch(0.22 0.04 330);
-  --sidebar-accent: oklch(0.31 0.055 330);
-  --sidebar-accent-foreground: oklch(0.98 0.005 85);
-  --sidebar-border: oklch(0.33 0.04 330);
-  --sidebar-ring: oklch(0.7 0.1 75);
+  /* Shayvera brand, from the logo: lotus green, saffron orange, leaf lime. */
+  --brand-green: #0a774e;
+  --brand-green-deep: #07533a;
+  --brand-orange: #d4651d;
+  --brand-lime: #a1cc3d;
+
+  --radius: 0.75rem;
+  --background: #f5f9f6;
+  --foreground: #11251c;
+  --card: #ffffff;
+  --card-foreground: #11251c;
+  --popover: #ffffff;
+  --popover-foreground: #11251c;
+  --primary: #0a774e;
+  --primary-foreground: #ffffff;
+  --secondary: #e7f3ec;
+  --secondary-foreground: #075c3c;
+  --muted: #eef4f0;
+  --muted-foreground: #56685f;
+  --accent: #e7f3ec;
+  --accent-foreground: #075c3c;
+  --destructive: #c81e1e;
+  --border: #d9e6de;
+  --input: #cfdfd5;
+  --ring: #0a774e;
+  --success: #0a774e;
+  --warning: #c27410;
+  --chart-1: #0a774e;
+  --chart-2: #dc7128;
+  --chart-3: #a1cc3d;
+  --chart-4: #2b6cb0;
+  --chart-5: #7c5c3b;
+  --sidebar: #074a33;
+  --sidebar-foreground: #e4f1e9;
+  --sidebar-primary: #f08a45;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #0b5f42;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #0e5a3f;
+  --sidebar-ring: #a1cc3d;
 }
 
 @layer base {
@@ -96,10 +100,12 @@
 }
 
 @theme inline {
-  --color-gold: var(--gold);
+  --color-brand-green: var(--brand-green);
+  --color-brand-orange: var(--brand-orange);
+  --color-brand-lime: var(--brand-lime);
   --color-success: var(--success);
   --color-warning: var(--warning);
-  --font-display: var(--font-display);
+  --font-display: var(--font-nunito);
 }
 
 @media print {

@@ -50,7 +50,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       />
 
       <section aria-labelledby="snapshot" className="mb-8">
-        <h2 id="snapshot" className="mb-3 text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+        <h2 id="snapshot" className="mb-3 text-xs font-bold tracking-[0.22em] text-brand-orange uppercase">
           Current snapshot
         </h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -98,7 +98,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <section aria-labelledby="activity" className="mb-8">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <h2 id="activity" className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+          <h2 id="activity" className="text-xs font-bold tracking-[0.22em] text-brand-orange uppercase">
             Activity · {periodLabel}
           </h2>
           <form className="no-print flex flex-wrap items-center gap-2" aria-label="Dashboard period">

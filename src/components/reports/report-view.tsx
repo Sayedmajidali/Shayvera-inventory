@@ -160,7 +160,7 @@ export async function ReportView({
 
       {/* Print header: what was printed, with which filters */}
       <div className="hidden print:block">
-        <p className="font-display text-lg font-semibold">Shayvera — {def.title}</p>
+        <p className="font-display text-lg font-extrabold">Shayvera — {def.title}</p>
         <p className="text-xs">
           Printed {formatDateTime(new Date(), settings.timezone, settings.dateFormat)} ({settings.timezone})
           {appliedFilters.length > 0 && (

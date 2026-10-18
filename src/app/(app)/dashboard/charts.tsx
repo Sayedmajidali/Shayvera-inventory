@@ -2,11 +2,11 @@
 
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-// Validated pair (lightness band, CVD separation, contrast on light surface).
-const DISPATCHED = "#9a3d7c";
-const RETURNED = "#c27c1c";
-const GRID = "oklch(0.92 0.01 330)";
-const AXIS = { fontSize: 12, fill: "oklch(0.5 0.02 330)" };
+// Brand green + saffron, validated together (lightness band, colour-blind separation, contrast).
+const DISPATCHED = "#0a774e";
+const RETURNED = "#dc7128";
+const GRID = "#e1ebe5";
+const AXIS = { fontSize: 12, fill: "#56685f" };
 
 function TooltipBox({
   active,
@@ -42,7 +42,7 @@ export function StoreChart({ data }: { data: { store: string; dispatched: number
           <CartesianGrid horizontal={false} stroke={GRID} />
           <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} />
           <YAxis type="category" dataKey="store" tick={AXIS} axisLine={false} tickLine={false} width={120} />
-          <Tooltip content={<TooltipBox />} cursor={{ fill: "oklch(0.96 0.01 330)" }} />
+          <Tooltip content={<TooltipBox />} cursor={{ fill: "#eef4f0" }} />
           <Legend formatter={legend} iconType="circle" iconSize={8} />
           <Bar dataKey="dispatched" name="Dispatched" fill={DISPATCHED} radius={[0, 4, 4, 0]} maxBarSize={18} />
           <Bar dataKey="returned" name="Returned" fill={RETURNED} radius={[0, 4, 4, 0]} maxBarSize={18} />
@@ -60,7 +60,7 @@ export function DailyChart({ data }: { data: { day: string; label: string; dispa
           <CartesianGrid vertical={false} stroke={GRID} />
           <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} minTickGap={24} />
           <YAxis tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
-          <Tooltip content={<TooltipBox />} cursor={{ fill: "oklch(0.96 0.01 330)" }} />
+          <Tooltip content={<TooltipBox />} cursor={{ fill: "#eef4f0" }} />
           <Legend formatter={legend} iconType="circle" iconSize={8} />
           <Bar dataKey="dispatched" name="Dispatched" fill={DISPATCHED} radius={[4, 4, 0, 0]} maxBarSize={14} />
           <Bar dataKey="returned" name="Returned" fill={RETURNED} radius={[4, 4, 0, 0]} maxBarSize={14} />

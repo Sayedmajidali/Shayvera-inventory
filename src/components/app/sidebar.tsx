@@ -6,7 +6,7 @@ import { Boxes, ChevronDown, FlaskConical, LayoutDashboard, Settings2, Store } f
 import { useState } from "react";
 import type { NavSection } from "@/lib/nav";
 import { cn } from "@/lib/utils";
-import { Wordmark } from "./logo";
+import { BrandLockupLight } from "./logo";
 
 const ICONS = { dashboard: LayoutDashboard, raw: FlaskConical, product: Boxes, ecom: Store, admin: Settings2 };
 
@@ -94,9 +94,13 @@ export function SidebarNav({ sections, onNavigate }: { sections: NavSection[]; o
 
 export function SidebarBrand() {
   return (
-    <div className="flex h-16 items-center border-b border-sidebar-border px-5">
-      <Link href="/dashboard" aria-label="Shayvera dashboard">
-        <Wordmark light />
+    <div className="flex h-20 items-center border-b border-sidebar-border px-5">
+      <Link
+        href="/dashboard"
+        aria-label="Shayvera dashboard"
+        className="rounded-md focus-visible:outline-2 focus-visible:outline-sidebar-ring"
+      >
+        <BrandLockupLight />
       </Link>
     </div>
   );
