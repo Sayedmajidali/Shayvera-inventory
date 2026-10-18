@@ -7,8 +7,7 @@ import { UserMenu } from "@/components/app/user-menu";
 import { getSettings } from "@/server/settings";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const actor = await requirePage();
-  const settings = await getSettings();
+  const [actor, settings] = await Promise.all([requirePage(), getSettings()]);
   const sections: NavSection[] = NAV.flatMap((s) => {
     if (s.href) return s.permission?.some((p) => can(actor, p)) ? [s] : [];
     const items = s.items?.filter((i) => i.permission.some((p) => can(actor, p))) ?? [];

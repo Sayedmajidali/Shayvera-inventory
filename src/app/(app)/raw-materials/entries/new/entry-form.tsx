@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/app/fast-link";
 import { Loader2 } from "lucide-react";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";

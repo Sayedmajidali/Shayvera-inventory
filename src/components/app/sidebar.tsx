@@ -1,12 +1,27 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/app/fast-link";
+import { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { Boxes, ChevronDown, FlaskConical, LayoutDashboard, Settings2, Store } from "lucide-react";
 import { useState } from "react";
 import type { NavSection } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { BrandLockupLight } from "./logo";
+
+/** Shows the moment a menu item is clicked, until its page arrives. */
+function PendingDot() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "ml-auto size-1.5 rounded-full bg-sidebar-primary transition-opacity",
+        pending ? "animate-pulse opacity-100" : "opacity-0",
+      )}
+    />
+  );
+}
 
 const ICONS = { dashboard: LayoutDashboard, raw: FlaskConical, product: Boxes, ecom: Store, admin: Settings2 };
 
@@ -30,6 +45,7 @@ export function SidebarNav({ sections, onNavigate }: { sections: NavSection[]; o
             <Link
               key={section.label}
               href={section.href}
+              prefetch={null}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
               className={cn(
@@ -41,6 +57,7 @@ export function SidebarNav({ sections, onNavigate }: { sections: NavSection[]; o
             >
               <Icon className="size-4" />
               {section.label}
+              <PendingDot />
             </Link>
           );
         }
@@ -69,6 +86,7 @@ export function SidebarNav({ sections, onNavigate }: { sections: NavSection[]; o
                     <li key={item.href}>
                       <Link
                         href={item.href}
+                        prefetch={null}
                         onClick={onNavigate}
                         aria-current={active ? "page" : undefined}
                         className={cn(
@@ -79,6 +97,7 @@ export function SidebarNav({ sections, onNavigate }: { sections: NavSection[]; o
                         )}
                       >
                         {item.label}
+                        <PendingDot />
                       </Link>
                     </li>
                   );

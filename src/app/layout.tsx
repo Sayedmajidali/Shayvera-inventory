@@ -1,13 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Nunito } from "next/font/google";
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
+// Fonts are bundled from npm, so builds never depend on downloading from Google Fonts.
+// Nunito (rounded, heavy) echoes the SHAYVERA wordmark in headings.
+import "@fontsource-variable/nunito";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
-
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
-// Rounded, heavy headings echo the SHAYVERA wordmark.
-const display = Nunito({ variable: "--font-nunito", subsets: ["latin"], weight: ["700", "800", "900"] });
 
 export const metadata: Metadata = {
   title: { default: "Shayvera Inventory", template: "%s · Shayvera" },
@@ -18,7 +17,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${display.variable} font-sans`}>
+      <body className={`${GeistSans.variable} ${GeistMono.variable} font-sans`}>
         <TooltipProvider delayDuration={200}>{children}</TooltipProvider>
         <Toaster position="top-right" richColors closeButton />
       </body>

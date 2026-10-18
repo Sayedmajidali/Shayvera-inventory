@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/app/fast-link";
 import { Plus } from "lucide-react";
 import { requirePage } from "@/server/auth";
 import { prisma } from "@/server/db";

@@ -47,7 +47,23 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
  */
 export const PLATFORM_UPLOAD_CAP_MB = process.env.STORAGE_DRIVER === "netlify" || process.env.NETLIFY === "true" ? 4 : 25;
 
+// Settings change rarely, so each server instance keeps them for a minute
+// instead of querying on every page. Saving settings clears this copy.
+const SETTINGS_TTL_MS = 60_000;
+let cached: { value: BusinessSettings; at: number } | null = null;
+
+export function invalidateSettingsCache() {
+  cached = null;
+}
+
 async function loadSettings(): Promise<BusinessSettings> {
+  if (cached && Date.now() - cached.at < SETTINGS_TTL_MS) return cached.value;
+  const value = await querySettings();
+  cached = { value, at: Date.now() };
+  return value;
+}
+
+async function querySettings(): Promise<BusinessSettings> {
   const row = await prisma.setting.findUnique({ where: { key: "business" } });
   const parsed = settingsSchema.safeParse({ ...DEFAULT_SETTINGS, ...((row?.value as object) ?? {}) });
   const settings = parsed.success ? parsed.data : DEFAULT_SETTINGS;

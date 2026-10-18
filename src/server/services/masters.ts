@@ -6,7 +6,7 @@ import { assertCan, sanitizePermissions, type Actor } from "../permissions";
 import { nextNumber } from "../sequence";
 import { optionalText, parse, requiredText } from "../validation";
 import { hashPassword } from "../auth-hash";
-import { settingsSchema } from "../settings";
+import { invalidateSettingsCache, settingsSchema } from "../settings";
 
 // ---------------------------------------------------------------------------
 // Suppliers
@@ -382,7 +382,7 @@ async function assertAnotherActiveAdmin(tx: import("../db").Tx, excludingId: str
 export async function updateSettings(actor: Actor, input: unknown) {
   assertCan(actor, "admin.settings");
   const data = parse(settingsSchema, input);
-  return prisma.$transaction(async (tx) => {
+  const saved = await prisma.$transaction(async (tx) => {
     const before = await tx.setting.findUnique({ where: { key: "business" } });
     await tx.setting.upsert({ where: { key: "business" }, create: { key: "business", value: data }, update: { value: data } });
     await audit(tx, {
@@ -395,4 +395,6 @@ export async function updateSettings(actor: Actor, input: unknown) {
     });
     return data;
   });
+  invalidateSettingsCache(); // after commit, so no request can re-cache the old values
+  return saved;
 }

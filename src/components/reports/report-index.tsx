@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/app/fast-link";
 import { ArrowRight, FileBarChart } from "lucide-react";
 import type { ReportDef } from "@/server/reports/types";
 import { EmptyState } from "@/components/app/empty-state";

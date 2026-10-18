@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/app/fast-link";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Download, FileText } from "lucide-react";
 import { prisma } from "@/server/db";
 import { runReport, type Params } from "@/server/reports/run";

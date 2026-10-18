@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/app/fast-link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Prisma } from "@prisma/client";
 import { requirePage } from "@/server/auth";

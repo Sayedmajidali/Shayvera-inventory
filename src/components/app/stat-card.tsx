@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/app/fast-link";
 import { ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
