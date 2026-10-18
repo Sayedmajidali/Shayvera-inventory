@@ -126,7 +126,37 @@ Timestamps are stored in UTC. Business days ("today", report ranges, expiry chec
 npm test
 ```
 
-The suite (65 tests) runs the real services against PostgreSQL. It covers approval-once under concurrent requests, rejection, reversal and re-inspection, immutable ledgers, bill access control, per-product thresholds and expiry periods, batch separation, FEFO, oversell protection under six parallel dispatches, duplicate submissions, return caps under concurrency, return conditions and quarantine decisions, store and date filters, reconciliation, permission enforcement, CSV formula-injection protection, the CSV importer, dashboard totals, and edit/delete rules with their audit trail.
+The suite (66 tests) runs the real services against PostgreSQL. It covers approval-once under concurrent requests, rejection, reversal and re-inspection, immutable ledgers, bill access control, per-product thresholds and expiry periods, batch separation, FEFO, oversell protection under six parallel dispatches, duplicate submissions, return caps under concurrency, return conditions and quarantine decisions, store and date filters, reconciliation, permission enforcement, CSV formula-injection protection, the CSV importer, dashboard totals, and edit/delete rules with their audit trail.
+
+## Deploying to Netlify
+
+The repo is ready for Netlify: `netlify.toml` uses the official Next.js runtime, and `scripts/netlify-build.sh` applies database migrations, seeds units and the first admin, then builds.
+
+**1. Import the site.** In Netlify, choose _Add new project → Import an existing project → GitHub_ and pick this repository. The build settings come from `netlify.toml`. The very first deploy fails with _"no database configured"_ until steps 2 and 3 are done; that's expected.
+
+**2. Add a database (Netlify DB).** In the site's dashboard, add **Netlify DB** (powered by Neon). It sets `NETLIFY_DATABASE_URL` and `NETLIFY_DATABASE_URL_UNPOOLED` for you. **Claim the database** when Netlify offers it (this links it to a free Neon account); unclaimed databases are temporary.
+_Using your own PostgreSQL instead?_ Set `DATABASE_URL` (pooled connection) and `DIRECT_DATABASE_URL` (direct connection, used for migrations).
+
+**3. Set environment variables** under _Site configuration → Environment variables_:
+
+| Variable              | Value                                                           |
+| --------------------- | --------------------------------------------------------------- |
+| `SESSION_SECRET`      | 64 random characters, e.g. the output of `openssl rand -hex 32` |
+| `STORAGE_DRIVER`      | `netlify` (bills and images go to private Netlify Blobs)        |
+| `APP_TIMEZONE`        | `Asia/Kolkata` (or your business timezone)                      |
+| `SEED_ADMIN_EMAIL`    | the first administrator's email                                 |
+| `SEED_ADMIN_NAME`     | their name                                                      |
+| `SEED_ADMIN_PASSWORD` | a strong password, at least 10 characters                       |
+
+**4. Deploy.** _Deploys → Trigger deploy → Deploy site._ The build log shows the migrations and _Created administrator …_.
+
+**5. Sign in, then tidy up.** Sign in with the admin account and change the password (user menu → Change password). Then delete `SEED_ADMIN_PASSWORD` from the environment variables; later deploys leave existing admins unchanged.
+
+Notes:
+
+- Every push to `main` redeploys automatically. Migrations run on each deploy and are safe to re-run.
+- Uploads are capped at **4 MB per file** on Netlify (its functions accept requests up to 6 MB). Settings shows the limit.
+- `GET /api/health` checks the app and database connection.
 
 ## Deployment
 

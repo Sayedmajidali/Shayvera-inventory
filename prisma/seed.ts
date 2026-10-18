@@ -23,7 +23,10 @@ async function main() {
 
   const email = (process.env.SEED_ADMIN_EMAIL || "admin@shayvera.local").toLowerCase();
   let admin = await prisma.user.findUnique({ where: { email } });
-  if (!admin) {
+  if (!admin && !process.env.SEED_ADMIN_PASSWORD && (process.env.CI || process.env.NETLIFY)) {
+    // Never print a generated password into hosted build logs.
+    console.log("No administrator created: set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD for the build to create one.");
+  } else if (!admin) {
     const generated = !process.env.SEED_ADMIN_PASSWORD;
     const password = process.env.SEED_ADMIN_PASSWORD || randomBytes(12).toString("base64url");
     if (password.length < 10) throw new Error("SEED_ADMIN_PASSWORD must be at least 10 characters.");
@@ -36,7 +39,7 @@ async function main() {
     console.log(`Administrator ${email} already exists — left unchanged.`);
   }
 
-  if (process.env.SEED_DEMO === "true") await demo(admin.id);
+  if (process.env.SEED_DEMO === "true" && admin) await demo(admin.id);
 }
 
 async function demo(adminId: string) {

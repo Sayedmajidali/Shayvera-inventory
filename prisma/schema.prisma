@@ -11,7 +11,9 @@
 //   migrations (see prisma/migrations/*_constraints).
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "rhel-openssl-3.0.x" is the runtime of Netlify Functions (AWS Lambda, Node 20+).
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -38,10 +40,10 @@ model User {
   permissions  String[]  @default([])
   active       Boolean   @default(true)
   failedLogins Int       @default(0)
-  lockedUntil  DateTime?
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  lockedUntil  DateTime? @db.Timestamptz(3)
+  lastLoginAt  DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
 
   sessions  Session[]
   auditLogs AuditLog[]
@@ -70,8 +72,8 @@ model Session {
   tokenHash String   @unique
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
   userAgent String?
   ip        String?
 
@@ -87,7 +89,7 @@ model AuditLog {
   entityId   String?
   summary    String
   details    Json?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([createdAt])
   @@index([entityType, entityId])
@@ -97,7 +99,7 @@ model AuditLog {
 model Setting {
   key       String   @id
   value     Json
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 }
 
 // Gap-free human readable document numbers (RM-000001, DSP-000001, ...)
@@ -116,7 +118,7 @@ model Unit {
   name          String
   allowsDecimal Boolean  @default(false)
   active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
   rawMaterials        RawMaterial[]
   rawEntries          RawMaterialEntry[]
@@ -135,8 +137,8 @@ model Supplier {
   address       String?
   gstNumber     String?
   active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
 
   entries     RawMaterialEntry[]
   attachments BillAttachment[]
@@ -152,8 +154,8 @@ model Store {
   contact   String?
   notes     String?
   active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   dispatches          Dispatch[]
   returns             ProductReturn[]
@@ -168,7 +170,7 @@ model ProductCategory {
   id        String         @id @default(cuid())
   name      String         @unique
   active    Boolean        @default(true)
-  createdAt DateTime       @default(now())
+  createdAt DateTime       @default(now()) @db.Timestamptz(3)
   products  ReadyProduct[]
 }
 
@@ -185,8 +187,8 @@ model RawMaterial {
   // Cached balance. Always equal to SUM(RawMaterialTransaction.quantity).
   currentBalance Decimal  @default(0) @db.Decimal(18, 3)
   active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
 
   entries      RawMaterialEntry[]
   transactions RawMaterialTransaction[]
@@ -203,7 +205,7 @@ enum EntryStatus {
 model RawMaterialEntry {
   id             String      @id @default(cuid())
   entryNo        String      @unique
-  entryDate      DateTime
+  entryDate      DateTime    @db.Timestamptz(3)
   rawMaterialId  String
   rawMaterial    RawMaterial @relation(fields: [rawMaterialId], references: [id])
   supplierId     String
@@ -218,11 +220,11 @@ model RawMaterialEntry {
   idempotencyKey String      @unique
   createdById    String
   createdBy      User        @relation("EntryCreatedBy", fields: [createdById], references: [id])
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
   // Soft delete: only allowed while pending (no stock posted). The row is kept
   // for the audit trail and hidden from lists, counts and inspection.
-  deletedAt      DateTime?
+  deletedAt      DateTime?   @db.Timestamptz(3)
   deletedById    String?
   deletedBy      User?       @relation("EntryDeletedBy", fields: [deletedById], references: [id])
   deleteReason   String?
@@ -256,8 +258,8 @@ model QualityInspection {
   rejectionReason String?
   inspectedById   String
   inspectedBy     User               @relation("InspectedBy", fields: [inspectedById], references: [id])
-  inspectedAt     DateTime           @default(now())
-  reversedAt      DateTime?
+  inspectedAt     DateTime           @default(now()) @db.Timestamptz(3)
+  reversedAt      DateTime?          @db.Timestamptz(3)
   reversedById    String?
   reversedBy      User?              @relation("InspectionReversedBy", fields: [reversedById], references: [id])
   reversalReason  String?
@@ -294,7 +296,7 @@ model RawMaterialTransaction {
   idempotencyKey String?            @unique
   createdById    String
   createdBy      User               @relation(fields: [createdById], references: [id])
-  createdAt      DateTime           @default(now())
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
 
   // One posting per (inspection, type): approval can never add stock twice and
   // its reversal can never be posted twice.
@@ -324,11 +326,11 @@ model ReadyProduct {
   imageAttachmentId String?          @unique
   imageAttachment   BillAttachment?  @relation("ProductImage", fields: [imageAttachmentId], references: [id])
   active            Boolean          @default(true)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
   // Soft delete: only allowed with zero stock in every bucket. History, batches
   // and ledger rows are kept; the SKU stays reserved.
-  deletedAt         DateTime?
+  deletedAt         DateTime?        @db.Timestamptz(3)
   deletedById       String?
   deletedBy         User?            @relation("ProductDeletedBy", fields: [deletedById], references: [id])
   deleteReason      String?
@@ -357,7 +359,7 @@ model ProductBatch {
   notes        String?
   createdById  String
   createdBy    User         @relation(fields: [createdById], references: [id])
-  createdAt    DateTime     @default(now())
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
 
   balances     StockBalance[]
   transactions ProductTransaction[]
@@ -385,7 +387,7 @@ model StockBalance {
   batch     ProductBatch @relation(fields: [batchId], references: [id])
   bucket    StockBucket
   quantity  Decimal      @default(0) @db.Decimal(18, 3)
-  updatedAt DateTime     @updatedAt
+  updatedAt DateTime     @updatedAt @db.Timestamptz(3)
 
   @@unique([batchId, bucket])
   @@index([productId, bucket])
@@ -434,7 +436,7 @@ model ProductTransaction {
   idempotencyKey String?                @unique
   createdById    String
   createdBy      User                   @relation(fields: [createdById], references: [id])
-  createdAt      DateTime               @default(now())
+  createdAt      DateTime               @default(now()) @db.Timestamptz(3)
 
   @@index([productId, createdAt])
   @@index([storeId, createdAt])
@@ -457,7 +459,7 @@ model InventoryAdjustment {
   idempotencyKey String       @unique
   createdById    String
   createdBy      User         @relation(fields: [createdById], references: [id])
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
 
   transactions ProductTransaction[]
 
@@ -478,8 +480,8 @@ model LowStockAlert {
   status       AlertStatus  @default(OPEN)
   availableQty Decimal      @db.Decimal(18, 3)
   threshold    Decimal      @db.Decimal(18, 3)
-  triggeredAt  DateTime     @default(now())
-  resolvedAt   DateTime?
+  triggeredAt  DateTime     @default(now()) @db.Timestamptz(3)
+  resolvedAt   DateTime?    @db.Timestamptz(3)
 
   @@index([status])
   @@index([productId])
@@ -497,7 +499,7 @@ enum DocStatus {
 model Dispatch {
   id             String    @id @default(cuid())
   dispatchNo     String    @unique
-  dispatchDate   DateTime
+  dispatchDate   DateTime  @db.Timestamptz(3)
   storeId        String
   store          Store     @relation(fields: [storeId], references: [id])
   orderRef       String?
@@ -507,8 +509,8 @@ model Dispatch {
   idempotencyKey String    @unique
   createdById    String
   createdBy      User      @relation("DispatchCreatedBy", fields: [createdById], references: [id])
-  createdAt      DateTime  @default(now())
-  reversedAt     DateTime?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  reversedAt     DateTime? @db.Timestamptz(3)
   reversedById   String?
   reversedBy     User?     @relation("DispatchReversedBy", fields: [reversedById], references: [id])
   reversalReason String?
@@ -567,7 +569,7 @@ enum ReturnCondition {
 model ProductReturn {
   id             String    @id @default(cuid())
   returnNo       String    @unique
-  returnDate     DateTime
+  returnDate     DateTime  @db.Timestamptz(3)
   storeId        String
   store          Store     @relation(fields: [storeId], references: [id])
   dispatchId     String
@@ -578,8 +580,8 @@ model ProductReturn {
   idempotencyKey String    @unique
   createdById    String
   createdBy      User      @relation("ReturnCreatedBy", fields: [createdById], references: [id])
-  createdAt      DateTime  @default(now())
-  reversedAt     DateTime?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  reversedAt     DateTime? @db.Timestamptz(3)
   reversedById   String?
   reversedBy     User?     @relation("ReturnReversedBy", fields: [reversedById], references: [id])
   reversalReason String?
@@ -636,7 +638,7 @@ model QuarantineDisposition {
   idempotencyKey String             @unique
   createdById    String
   createdBy      User               @relation(fields: [createdById], references: [id])
-  createdAt      DateTime           @default(now())
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
 
   transactions ProductTransaction[]
 }
@@ -646,7 +648,7 @@ model QuarantineDisposition {
 model StoreSale {
   id             String       @id @default(cuid())
   saleNo         String       @unique
-  saleDate       DateTime
+  saleDate       DateTime     @db.Timestamptz(3)
   storeId        String
   store          Store        @relation(fields: [storeId], references: [id])
   productId      String
@@ -657,7 +659,7 @@ model StoreSale {
   idempotencyKey String       @unique
   createdById    String
   createdBy      User         @relation(fields: [createdById], references: [id])
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
 
   @@index([storeId, saleDate])
   @@index([productId])
@@ -705,12 +707,12 @@ model BillAttachment {
   replaces           BillAttachment?    @relation("Replacement", fields: [replacesId], references: [id])
   replacedBy         BillAttachment?    @relation("Replacement")
   replacementReason  String?
-  replacedAt         DateTime?
+  replacedAt         DateTime?          @db.Timestamptz(3)
   replacedById       String?
   replacedByUser     User?              @relation("ReplacedBy", fields: [replacedById], references: [id])
   uploadedById       String
   uploadedBy         User               @relation("UploadedBy", fields: [uploadedById], references: [id])
-  uploadedAt         DateTime           @default(now())
+  uploadedAt         DateTime           @default(now()) @db.Timestamptz(3)
 
   productImageOf ReadyProduct? @relation("ProductImage")
 

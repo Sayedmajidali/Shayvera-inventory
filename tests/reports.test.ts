@@ -4,7 +4,8 @@ import { REPORTS, getReport } from "@/server/reports";
 import { cellText, type RunContext } from "@/server/reports/types";
 import { ecomPeriodTotals } from "@/server/reports/ecommerce";
 import { approveEntry, rejectEntry } from "@/server/services/raw-materials";
-import { createReturn, recordStoreSale } from "@/server/services/ecommerce";
+import { createDispatch, createReturn, recordStoreSale } from "@/server/services/ecommerce";
+import { getDashboard } from "@/server/services/dashboard";
 import { dayOffset, dispatch, key, nowLocal, product, rawEntry, receive, resetDb, seedFixture, today, TZ, type Fixture } from "./helpers";
 
 let f: Fixture;
@@ -116,5 +117,28 @@ describe("reports", () => {
     expect(low.rows.map((r) => cellText(r.name))).toEqual(["Alpha Serum"]); // 50 - 12 - 8 = 30 <= 30; the damaged return does not restock
     const rec = await getReport("ec-reconciliation")!.run({}, ctx());
     expect(rec.rows.every((r) => cellText(r.status) === "Reconciled")).toBe(true);
+  });
+});
+
+describe("business-day boundaries", () => {
+  it("counts a dispatch made just after midnight in that business day", async () => {
+    // 00:30 in the business timezone is the previous UTC day for zones ahead of UTC.
+    const p = await product(f, { name: "Midnight Balm", lowStockThreshold: "0" });
+    await receive(f, p.id, "10", dayOffset(200));
+    const day = dayOffset(-1);
+    await createDispatch(f.staff, {
+      idempotencyKey: key(),
+      dispatchDate: `${day}T00:30`,
+      storeId: f.store2Id,
+      lines: [{ productId: p.id, quantity: "3" }],
+    });
+
+    const totals = await ecomPeriodTotals({ from: day, to: day, productId: p.id }, ctx());
+    expect(Number(totals.byUnit[0]?.dispatched ?? 0)).toBe(3);
+    const before = await ecomPeriodTotals({ from: dayOffset(-2), to: dayOffset(-2), productId: p.id }, ctx());
+    expect(before.byUnit).toHaveLength(0);
+
+    const dash = await getDashboard({ from: day, to: day, tz: TZ, today: today(), dateFormat: "dd MMM yyyy" });
+    expect(dash.dailyChart).toEqual([{ day, dispatched: 3, returned: 0 }]);
   });
 });

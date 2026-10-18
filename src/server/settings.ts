@@ -41,10 +41,17 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   allowExpiredDispatchByAdmin: false,
 };
 
+/**
+ * Hosting limit on upload size. Netlify Functions accept request bodies up to
+ * 6 MB, so files are capped at 4 MB there whatever the admin setting says.
+ */
+export const PLATFORM_UPLOAD_CAP_MB = process.env.STORAGE_DRIVER === "netlify" || process.env.NETLIFY === "true" ? 4 : 25;
+
 async function loadSettings(): Promise<BusinessSettings> {
   const row = await prisma.setting.findUnique({ where: { key: "business" } });
   const parsed = settingsSchema.safeParse({ ...DEFAULT_SETTINGS, ...((row?.value as object) ?? {}) });
-  return parsed.success ? parsed.data : DEFAULT_SETTINGS;
+  const settings = parsed.success ? parsed.data : DEFAULT_SETTINGS;
+  return { ...settings, maxUploadMb: Math.min(settings.maxUploadMb, PLATFORM_UPLOAD_CAP_MB) };
 }
 
 /** Per-request cached settings for server components. */

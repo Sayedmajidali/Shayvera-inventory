@@ -44,3 +44,6 @@ next-env.d.ts
 /storage
 !.env.example
 !.env.test.example
+
+# local database backups
+/backups

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requirePage } from "@/server/auth";
 import { prisma } from "@/server/db";
 import { can } from "@/server/permissions";
-import { ALLOWED_FILE_TYPES, getSettings } from "@/server/settings";
+import { ALLOWED_FILE_TYPES, getSettings, PLATFORM_UPLOAD_CAP_MB } from "@/server/settings";
 import { PageHeader } from "@/components/app/page-header";
 import { SectionCard } from "@/components/app/section-card";
 import { StatusBadge } from "@/components/app/status-badge";
@@ -45,6 +45,7 @@ export default async function SettingsPage() {
               timezones={timezones.includes(settings.timezone) ? timezones : [settings.timezone, ...timezones]}
               dateFormats={DATE_FORMATS.map((f) => ({ value: f, example: `${formatDate(new Date(), settings.timezone, f)}  (${f})` }))}
               fileTypes={Object.entries(ALLOWED_FILE_TYPES).map(([value, label]) => ({ value, label }))}
+              uploadCapMb={PLATFORM_UPLOAD_CAP_MB}
             />
           </SectionCard>
         )}

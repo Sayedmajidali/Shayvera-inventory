@@ -15,6 +15,7 @@ export function SettingsForm({
   timezones,
   dateFormats,
   fileTypes,
+  uploadCapMb,
 }: {
   values: {
     businessName: string;
@@ -27,6 +28,7 @@ export function SettingsForm({
   timezones: string[];
   dateFormats: { value: string; example: string }[];
   fileTypes: { value: string; label: string }[];
+  uploadCapMb: number;
 }) {
   const [types, setTypes] = useState(new Set(values.allowedFileTypes));
   const [allowExpired, setAllowExpired] = useState(values.allowExpiredDispatchByAdmin);
@@ -71,8 +73,14 @@ export function SettingsForm({
             ))}
           </NativeSelect>
         </Field>
-        <Field label="Maximum upload size (MB)" htmlFor="st-mb" required error={fieldErrors.maxUploadMb}>
-          <Input id="st-mb" name="maxUploadMb" type="number" min={1} max={25} defaultValue={values.maxUploadMb} required />
+        <Field
+          label="Maximum upload size (MB)"
+          htmlFor="st-mb"
+          required
+          error={fieldErrors.maxUploadMb}
+          hint={uploadCapMb < 25 ? `This hosting allows at most ${uploadCapMb} MB per file.` : undefined}
+        >
+          <Input id="st-mb" name="maxUploadMb" type="number" min={1} max={uploadCapMb} defaultValue={values.maxUploadMb} required />
         </Field>
       </div>
       <fieldset className="space-y-2">

@@ -1,0 +1,12 @@
+# Netlify deploys the Next.js app with the official Next.js runtime.
+# Required environment variables are listed in README.md ("Deploying to Netlify").
+
+[build]
+  command = "bash scripts/netlify-build.sh"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

@@ -1,0 +1,94 @@
+-- Store every instant as timestamptz.
+-- Values were written by Prisma as UTC into timestamp-without-time-zone columns;
+-- the USING clause converts them as UTC, so no stored time shifts. Raw SQL
+-- comparisons are then correct whatever the database session's TimeZone is.
+
+-- AlterTable
+ALTER TABLE "AuditLog" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "BillAttachment" ALTER COLUMN "replacedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "replacedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "uploadedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "uploadedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Dispatch" ALTER COLUMN "dispatchDate" SET DATA TYPE TIMESTAMPTZ(3) USING "dispatchDate" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "reversedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "reversedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "InventoryAdjustment" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "LowStockAlert" ALTER COLUMN "triggeredAt" SET DATA TYPE TIMESTAMPTZ(3) USING "triggeredAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "resolvedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "resolvedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "ProductBatch" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "ProductCategory" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "ProductReturn" ALTER COLUMN "returnDate" SET DATA TYPE TIMESTAMPTZ(3) USING "returnDate" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "reversedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "reversedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "ProductTransaction" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "QualityInspection" ALTER COLUMN "inspectedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "inspectedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "reversedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "reversedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "QuarantineDisposition" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "RawMaterial" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "RawMaterialEntry" ALTER COLUMN "entryDate" SET DATA TYPE TIMESTAMPTZ(3) USING "entryDate" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "deletedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "deletedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "RawMaterialTransaction" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "ReadyProduct" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "deletedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "deletedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Session" ALTER COLUMN "expiresAt" SET DATA TYPE TIMESTAMPTZ(3) USING "expiresAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Setting" ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "StockBalance" ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Store" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "StoreSale" ALTER COLUMN "saleDate" SET DATA TYPE TIMESTAMPTZ(3) USING "saleDate" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Supplier" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Unit" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "User" ALTER COLUMN "lockedUntil" SET DATA TYPE TIMESTAMPTZ(3) USING "lockedUntil" AT TIME ZONE 'UTC',
+ALTER COLUMN "lastLoginAt" SET DATA TYPE TIMESTAMPTZ(3) USING "lastLoginAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+

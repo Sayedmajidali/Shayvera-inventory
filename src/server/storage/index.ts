@@ -6,8 +6,9 @@ import path from "node:path";
  * Private file storage. Files are never served from a public URL: every read
  * goes through /api/files/[id], which checks the session and permissions.
  *
- * STORAGE_DRIVER=local  -> files under STORAGE_LOCAL_DIR (outside /public)
- * STORAGE_DRIVER=s3     -> private bucket on any S3-compatible service
+ * STORAGE_DRIVER=local    -> files under STORAGE_LOCAL_DIR (outside /public)
+ * STORAGE_DRIVER=s3       -> private bucket on any S3-compatible service
+ * STORAGE_DRIVER=netlify  -> Netlify Blobs (private, built into Netlify sites)
  */
 export interface StorageDriver {
   put(key: string, body: Buffer, contentType: string): Promise<void>;
@@ -68,6 +69,24 @@ class S3Storage implements StorageDriver {
   }
 }
 
+class NetlifyBlobStorage implements StorageDriver {
+  private store = import("@netlify/blobs").then(({ getStore }) => getStore({ name: "shayvera-documents", consistency: "strong" }));
+
+  async put(key: string, body: Buffer, contentType: string) {
+    const store = await this.store;
+    const data = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+    const res = await store.set(key, data, { metadata: { contentType }, onlyIfNew: true }); // never overwrite a document
+    if (!res.modified) throw new Error(`Storage key already exists: ${key}`);
+  }
+
+  async get(key: string) {
+    const store = await this.store;
+    const data = await store.get(key, { type: "arrayBuffer" });
+    if (!data) throw new Error(`Document missing from storage: ${key}`);
+    return Buffer.from(data);
+  }
+}
+
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} is required when STORAGE_DRIVER=s3`);
@@ -80,6 +99,7 @@ export function storage(): StorageDriver {
   if (driver) return driver;
   const kind = process.env.STORAGE_DRIVER || "local";
   if (kind === "s3") driver = new S3Storage(required("S3_BUCKET"));
+  else if (kind === "netlify") driver = new NetlifyBlobStorage();
   else driver = new LocalStorage(path.resolve(process.env.STORAGE_LOCAL_DIR || "./storage/private"));
   return driver;
 }
