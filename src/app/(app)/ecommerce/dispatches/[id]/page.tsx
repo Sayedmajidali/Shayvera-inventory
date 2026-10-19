@@ -13,7 +13,7 @@ import { AttachmentList } from "@/components/docs/attachment-list";
 import { UploadDialog } from "@/components/docs/upload-dialog";
 import { ConfirmAction } from "@/components/forms/confirm-action";
 import { Button } from "@/components/ui/button";
-import { DOC_STATUS } from "@/lib/labels";
+import { batchLabel, DOC_STATUS } from "@/lib/labels";
 import { formatCalendarDate, formatDateTime } from "@/lib/dates";
 import { dec, formatQty } from "@/lib/decimal";
 import { reverseDispatchAction, uploadEcomDocAction } from "../../actions";
@@ -128,7 +128,7 @@ export default async function DispatchDetail({ params }: { params: Promise<{ id:
                       <td className="px-4 py-2 text-xs">
                         {l.allocations.map((a) => (
                           <div key={a.id}>
-                            {a.batch.batchNo}
+                            {batchLabel(a.batch)}
                             {a.batch.expiryDate && ` (exp ${formatCalendarDate(a.batch.expiryDate, df)})`}: {formatQty(a.quantity)}
                           </div>
                         ))}

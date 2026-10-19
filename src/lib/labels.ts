@@ -64,3 +64,8 @@ export const ATTACHMENT_STATUS: Record<string, { label: string; tone: Tone }> = 
 
 export const toOptions = (map: Record<string, { label: string } | string>) =>
   Object.entries(map).map(([value, v]) => ({ value, label: typeof v === "string" ? v : v.label }));
+
+/** A deleted batch's number gets a "~suffix" so it can be reused; show the original, marked deleted. */
+export function batchLabel(b: { batchNo: string; deletedAt?: Date | null }) {
+  return b.deletedAt ? `${b.batchNo.split("~")[0]} (deleted)` : b.batchNo;
+}

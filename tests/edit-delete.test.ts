@@ -8,7 +8,18 @@ import {
   reverseInspection,
   updateRawMaterialEntry,
 } from "@/server/services/raw-materials";
-import { adjustStock, deleteProduct, receiveStock, restoreProduct, updateProduct } from "@/server/services/products";
+import {
+  adjustStock,
+  batchDeletionPreview,
+  deleteBatch,
+  deleteProduct,
+  deletionPreview,
+  receiveStock,
+  restoreProduct,
+  stockSummaries,
+  updateBatch,
+  updateProduct,
+} from "@/server/services/products";
 import { createReturn } from "@/server/services/ecommerce";
 import { getReport } from "@/server/reports";
 import { cellText, type RunContext } from "@/server/reports/types";
@@ -232,5 +243,152 @@ describe("editing and deleting products", () => {
     await expect(ret()).rejects.toThrow(/has been deleted/);
     await restoreProduct(f.admin, { productId: p.id, reason: "Return arrived" });
     await ret();
+  });
+});
+
+describe("deleting a product that still has stock", () => {
+  it("writes the stock off when confirmed, frees the SKU, and restore puts it back", async () => {
+    const p = await product(f, { lowStockThreshold: "0", sku: "ROSE-30", barcode: "8901234567890" });
+    await receive(f, p.id, "5", dayOffset(100), "B1");
+    await receive(f, p.id, "3", dayOffset(200), "B2");
+
+    const preview = await deletionPreview(f.admin, p.id);
+    expect(preview.holdings.map((h) => `${h.batchNo}:${h.bucket}:${h.qty}`).sort()).toEqual(["B1:SALEABLE:5", "B2:SALEABLE:3"]);
+
+    const res = await deleteProduct(f.admin, { productId: p.id, reason: "Entered by mistake", writeOffStock: "true" });
+    expect(res.writtenOff).toBe(2);
+    expect(Number((await prisma.stockBalance.aggregate({ where: { productId: p.id }, _sum: { quantity: true } }))._sum.quantity)).toBe(0);
+    const adjustments = await prisma.inventoryAdjustment.findMany({ where: { productId: p.id } });
+    expect(adjustments.map((a) => Number(a.quantityDelta)).sort((a, b) => a - b)).toEqual([-5, -3]);
+    expect(adjustments[0].reason).toMatch(/Written off on product deletion: Entered by mistake/);
+    expect(await prisma.productTransaction.count({ where: { productId: p.id } })).toBe(4); // 2 receipts + 2 write-offs
+
+    const row = await prisma.readyProduct.findUniqueOrThrow({ where: { id: p.id } });
+    expect(row.sku).not.toBe("ROSE-30");
+    expect(row.retiredSku).toBe("ROSE-30");
+    expect(row.barcode).toBeNull();
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: "product.delete", entityId: p.id } });
+    expect((log.details as { writtenOff: unknown[] }).writtenOff).toHaveLength(2);
+
+    // The SKU and barcode can be used for a corrected product straight away.
+    const again = await product(f, { lowStockThreshold: "0", sku: "ROSE-30", barcode: "8901234567890" });
+    await expect(restoreProduct(f.admin, { productId: p.id, reason: "Oops" })).rejects.toThrow(/SKU ROSE-30 is now used by/);
+    await updateProduct(f.admin, again.id, {
+      name: again.name,
+      sku: "ROSE-30-B",
+      unitId: f.pieces.id,
+      lowStockThreshold: "0",
+      expiryAlertDays: 30,
+      tracksExpiry: true,
+      barcode: "8901234567890",
+    });
+    await restoreProduct(f.admin, { productId: p.id, reason: "Oops" });
+    const restored = await prisma.readyProduct.findUniqueOrThrow({ where: { id: p.id } });
+    expect(restored).toMatchObject({ sku: "ROSE-30", retiredSku: null, barcode: null, active: true, deletedAt: null });
+  });
+});
+
+describe("editing and deleting batches", () => {
+  async function batchOf(productId: string, batchNo: string) {
+    return prisma.productBatch.findFirstOrThrow({ where: { productId, batchNo } });
+  }
+
+  it("corrects the batch number, received date and expiry date with a reason", async () => {
+    const p = await product(f, { lowStockThreshold: "0" });
+    await receive(f, p.id, "5", dayOffset(100), "B1");
+    const b = await batchOf(p.id, "B1");
+
+    await updateBatch(f.admin, { batchId: b.id, batchNo: "B1-A", receivedDate: dayOffset(-10), expiryDate: dayOffset(-1), reason: "Typo" });
+    const row = await prisma.productBatch.findUniqueOrThrow({ where: { id: b.id } });
+    expect(row.batchNo).toBe("B1-A");
+    // The new expiry is in the past, so the stock is no longer available.
+    expect((await stockSummaries([p.id], today())).get(p.id)!.available.toNumber()).toBe(0);
+
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: "batch.update", entityId: p.id } });
+    const d = log.details as { changes: { field: string; from: string; to: string }[]; reason: string };
+    expect(d.reason).toBe("Typo");
+    expect(d.changes.map((c) => c.field).sort()).toEqual(["batchNo", "expiryDate", "receivedDate"]);
+    expect(d.changes.find((c) => c.field === "expiryDate")).toMatchObject({ from: dayOffset(100), to: dayOffset(-1) });
+  });
+
+  it("validates batch edits", async () => {
+    const p = await product(f, { lowStockThreshold: "0" });
+    await receive(f, p.id, "5", dayOffset(100), "B1");
+    await receive(f, p.id, "5", dayOffset(120), "B2");
+    const b = await batchOf(p.id, "B1");
+    const base = { batchId: b.id, batchNo: "B1", receivedDate: dayOffset(-30), expiryDate: dayOffset(100), reason: "Fix" };
+
+    await expect(updateBatch(f.staff, { ...base, expiryDate: dayOffset(90) })).rejects.toThrow(/permission/);
+    await expect(updateBatch(f.admin, base)).rejects.toThrow(/Nothing was changed/);
+    await expect(updateBatch(f.admin, { ...base, expiryDate: dayOffset(-40) })).rejects.toThrow(/before the received date/);
+    await expect(updateBatch(f.admin, { ...base, receivedDate: dayOffset(1) })).rejects.toThrow(/future/);
+    await expect(updateBatch(f.admin, { ...base, expiryDate: "" })).rejects.toThrow(/expiry date/);
+    await expect(updateBatch(f.admin, { ...base, batchNo: "B2" })).rejects.toThrow(/already has a batch with that number/);
+    await expect(updateBatch(f.admin, { ...base, expiryDate: dayOffset(90), reason: "" })).rejects.toThrow(/Reason/);
+  });
+
+  it("deletes a batch after confirming the write-off, and frees its number", async () => {
+    const p = await product(f, { lowStockThreshold: "0" });
+    await receive(f, p.id, "5", dayOffset(100), "B1");
+    await receive(f, p.id, "2", dayOffset(150), "B2");
+    const b = await batchOf(p.id, "B1");
+
+    expect(await batchDeletionPreview(f.admin, b.id)).toMatchObject({
+      batchNo: "B1",
+      holdings: [{ bucket: "SALEABLE", qty: "5" }],
+      returnable: "0",
+    });
+    await expect(deleteBatch(f.admin, { batchId: b.id, reason: "Duplicate receipt" })).rejects.toThrow(
+      /Batch B1 still has stock \(5 pieces saleable\)/,
+    );
+    await expect(deleteBatch(f.staff, { batchId: b.id, reason: "x", writeOffStock: "true" })).rejects.toThrow(/permission/);
+    await deleteBatch(f.admin, { batchId: b.id, reason: "Duplicate receipt", writeOffStock: "true" });
+
+    const row = await prisma.productBatch.findUniqueOrThrow({ where: { id: b.id } });
+    expect(row.deletedAt).not.toBeNull();
+    expect(row.deleteReason).toBe("Duplicate receipt");
+    expect(row.batchNo).not.toBe("B1");
+    expect((await stockSummaries([p.id], today())).get(p.id)!.available.toNumber()).toBe(2);
+    const adj = await prisma.inventoryAdjustment.findFirstOrThrow({ where: { batchId: b.id } });
+    expect(Number(adj.quantityDelta)).toBe(-5);
+    expect(await prisma.auditLog.count({ where: { action: "batch.delete", entityId: p.id } })).toBe(1);
+
+    const batches = await getReport("pr-batches")!.run({}, ctx());
+    expect(batches.total).toBe(1);
+    const ledger = await getReport("pr-ledger")!.run({ productId: p.id }, ctx());
+    expect(ledger.rows.filter((r) => r.batch === "B1 (deleted)")).toHaveLength(2); // receipt + write-off
+    await expect(deleteBatch(f.admin, { batchId: b.id, reason: "again", writeOffStock: "true" })).rejects.toThrow(/not found/i);
+
+    // The number can be received again as a fresh batch.
+    await expect(receive(f, p.id, "4", dayOffset(100), "B1~X")).rejects.toThrow(/can't contain ~/);
+    await receive(f, p.id, "4", dayOffset(100), "B1");
+    const fresh = await batchOf(p.id, "B1");
+    expect(fresh.id).not.toBe(b.id);
+    expect(Number(fresh.initialQty)).toBe(4);
+  });
+
+  it("deletes an empty batch without writing anything off", async () => {
+    const p = await product(f, { lowStockThreshold: "0" });
+    await receive(f, p.id, "5", dayOffset(100), "B1");
+    const b = await batchOf(p.id, "B1");
+    await adjustStock(f.admin, {
+      idempotencyKey: key(),
+      productId: p.id,
+      batchId: b.id,
+      bucket: "SALEABLE",
+      quantityDelta: "-5",
+      reason: "Count",
+    });
+    expect(await deleteBatch(f.admin, { batchId: b.id, reason: "Empty" })).toEqual({ writtenOff: 0 });
+  });
+
+  it("refuses to delete a batch whose dispatched stock could still be returned", async () => {
+    const p = await product(f, { lowStockThreshold: "0" });
+    await receive(f, p.id, "5", dayOffset(100), "B1");
+    const b = await batchOf(p.id, "B1");
+    await dispatch(f, [{ productId: p.id, quantity: "2" }]);
+    expect((await batchDeletionPreview(f.admin, b.id)).returnable).toBe("2");
+    await expect(deleteBatch(f.admin, { batchId: b.id, reason: "x", writeOffStock: "true" })).rejects.toThrow(/could still be returned/);
+    expect((await prisma.productBatch.findUniqueOrThrow({ where: { id: b.id } })).deletedAt).toBeNull();
   });
 });

@@ -334,6 +334,9 @@ model ReadyProduct {
   deletedById       String?
   deletedBy         User?            @relation("ProductDeletedBy", fields: [deletedById], references: [id])
   deleteReason      String?
+  // On delete the SKU and barcode are freed for reuse; the originals are kept here for Restore.
+  retiredSku        String?
+  retiredBarcode    String?
 
   batches        ProductBatch[]
   balances       StockBalance[]
@@ -360,6 +363,11 @@ model ProductBatch {
   createdById  String
   createdBy    User         @relation(fields: [createdById], references: [id])
   createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+
+  // Soft delete (admin correction): stock is written off first and the batch
+  // number is freed; ledger rows keep pointing at this record.
+  deletedAt    DateTime? @db.Timestamptz(3)
+  deleteReason String?
 
   balances     StockBalance[]
   transactions ProductTransaction[]

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Prisma, StockBucket } from "@prisma/client";
 import { prisma, withTransaction, isUniqueViolation, type Tx } from "../db";
@@ -17,13 +18,14 @@ import {
   requiredText,
   signedQty,
 } from "../validation";
-import { dateOnly, todayInTz } from "@/lib/dates";
+import { dateOnly, dateOnlyString, todayInTz } from "@/lib/dates";
 import { dec } from "@/lib/decimal";
 import { createAttachmentRecord, storeFile, type UploadFile } from "./attachments";
 import { evaluateLowStock, postProductTxn } from "./inventory-core";
 import { describeChanges, diffFields } from "../changes";
 
 const optionalDay = z.preprocess((v) => (v === "" || v === null ? undefined : v), isoDay.optional());
+const batchNoText = optionalText(40).refine((v) => !v || !v.includes("~"), "Batch numbers can't contain ~");
 
 export const productSchema = z.object({
   name: requiredText(150, "Product name"),
@@ -43,7 +45,7 @@ export const productSchema = z.object({
 
 export const openingSchema = z.object({
   openingQty: z.preprocess((v) => (v === "" || v === null || v === undefined ? "0" : v), nonNegativeQty),
-  openingBatchNo: optionalText(40),
+  openingBatchNo: batchNoText,
   openingExpiryDate: optionalDay,
 });
 
@@ -200,28 +202,81 @@ export async function updateProduct(actor: Actor, id: string, input: unknown, im
  * stock in any bucket, so no inventory disappears; batches, ledger rows and
  * reports keep the full history, and the SKU stays reserved.
  */
+export interface DeletionPreview {
+  name: string;
+  sku: string;
+  unit: string;
+  holdings: { batchNo: string; expiry: string | null; bucket: StockBucket; qty: string }[];
+}
+
+/** What deleting a product would write off, shown in the delete warning. */
+export async function deletionPreview(actor: Actor, productId: string): Promise<DeletionPreview> {
+  assertCan(actor, "admin.masters");
+  const product = await prisma.readyProduct.findUnique({
+    where: { id: productId },
+    include: { unit: true, balances: { where: { quantity: { gt: 0 } }, include: { batch: true }, orderBy: { batch: { batchNo: "asc" } } } },
+  });
+  if (!product) throw new NotFoundError("Product");
+  return {
+    name: product.name,
+    sku: product.sku,
+    unit: product.unit.code,
+    holdings: product.balances.map((b) => ({
+      batchNo: b.batch.batchNo,
+      expiry: b.batch.expiryDate ? b.batch.expiryDate.toISOString().slice(0, 10) : null,
+      bucket: b.bucket,
+      qty: dec(b.quantity).toString(),
+    })),
+  };
+}
+
+const deleteSchema = z.object({
+  productId: requiredText(50, "Product"),
+  reason: requiredText(1000, "Reason for deleting"),
+  writeOffStock: z.preprocess((v) => v === true || v === "true", z.boolean()).default(false),
+});
+
+/**
+ * Delete a product (soft delete). If it still holds stock, the caller must
+ * confirm the write-off: every remaining batch/bucket quantity is removed with
+ * an adjustment carrying the delete reason, so the ledger still explains where
+ * the stock went. The SKU and barcode are freed for reuse; Restore brings them back.
+ */
 export async function deleteProduct(actor: Actor, input: unknown) {
   assertCan(actor, "admin.masters");
-  const data = parse(z.object({ productId: requiredText(50, "Product"), reason: requiredText(1000, "Reason for deleting") }), input);
+  const data = parse(deleteSchema, input);
   const settings = await readSettings();
   return withTransaction(async (tx) => {
-    // Lock the product (receipts take the same lock) and its balances so no stock can arrive while we check.
+    // Lock the product (receipts take the same lock) and its balances so no stock can arrive while we work.
     await tx.$queryRaw`SELECT "id" FROM "ReadyProduct" WHERE "id" = ${data.productId} FOR UPDATE`;
-    const balances = await tx.$queryRaw<{ bucket: StockBucket; qty: Prisma.Decimal }[]>`
-      SELECT "bucket", "quantity" AS qty FROM "StockBalance" WHERE "productId" = ${data.productId} FOR UPDATE`;
+    const balances = await tx.$queryRaw<{ batchId: string; bucket: StockBucket; qty: Prisma.Decimal }[]>`
+      SELECT "batchId", "bucket", "quantity" AS qty FROM "StockBalance" WHERE "productId" = ${data.productId} FOR UPDATE`;
     const product = await tx.readyProduct.findUnique({ where: { id: data.productId }, include: { unit: true } });
     if (!product) throw new NotFoundError("Product");
     if (product.deletedAt) throw new ValidationError("This product has already been deleted.");
+
     const held = balances.filter((b) => dec(b.qty).gt(0));
-    if (held.length) {
+    if (held.length && !data.writeOffStock) {
       const list = held.map((b) => `${dec(b.qty).toString()} ${product.unit.code} ${b.bucket.toLowerCase()}`).join(", ");
-      throw new ValidationError(
-        `${product.name} still has stock (${list}). Dispatch it, or post adjustments with a reason to bring every bucket to zero, before deleting.`,
-      );
+      throw new ValidationError(`${product.name} still has stock (${list}). Confirm writing it off to delete the product.`);
     }
+
+    const writtenOff = await writeOffBalances(tx, actor, product, held, `Written off on product deletion: ${data.reason}`);
+
+    // Free the SKU and barcode so a corrected product can use them straight away.
+    const retiredSku = `${product.sku}~${Date.now().toString(36).toUpperCase()}`;
     const updated = await tx.readyProduct.updateMany({
       where: { id: product.id, deletedAt: null },
-      data: { deletedAt: new Date(), deletedById: actor.id, deleteReason: data.reason, active: false },
+      data: {
+        deletedAt: new Date(),
+        deletedById: actor.id,
+        deleteReason: data.reason,
+        active: false,
+        sku: retiredSku,
+        retiredSku: product.sku,
+        barcode: null,
+        retiredBarcode: product.barcode,
+      },
     });
     if (updated.count !== 1) throw new ValidationError("This product has already been deleted.");
     await evaluateLowStock(tx, product.id, todayInTz(settings.timezone));
@@ -230,9 +285,10 @@ export async function deleteProduct(actor: Actor, input: unknown) {
       action: "product.delete",
       entityType: "ReadyProduct",
       entityId: product.id,
-      summary: `Deleted product ${product.name} (${product.sku}): ${data.reason}`,
+      summary: `Deleted product ${product.name} (${product.sku})${writtenOff.length ? `, writing off its remaining stock` : ""}: ${data.reason}`,
       details: {
         reason: data.reason,
+        writtenOff,
         snapshot: {
           productCode: product.productCode,
           name: product.name,
@@ -244,10 +300,11 @@ export async function deleteProduct(actor: Actor, input: unknown) {
         },
       },
     });
+    return { writtenOff: writtenOff.length };
   });
 }
 
-/** Undo a product deletion. The product comes back active with its full history. */
+/** Undo a product deletion. The product comes back active, with its original SKU and history. */
 export async function restoreProduct(actor: Actor, input: unknown) {
   assertCan(actor, "admin.masters");
   const data = parse(z.object({ productId: requiredText(50, "Product"), reason: requiredText(1000, "Reason for restoring") }), input);
@@ -255,9 +312,22 @@ export async function restoreProduct(actor: Actor, input: unknown) {
   return withTransaction(async (tx) => {
     const product = await tx.readyProduct.findUnique({ where: { id: data.productId } });
     if (!product) throw new NotFoundError("Product");
+    if (!product.deletedAt) throw new ValidationError("This product is not deleted.");
+
+    const sku = product.retiredSku ?? product.sku;
+    if (product.retiredSku) {
+      const taken = await tx.readyProduct.findUnique({ where: { sku: product.retiredSku } });
+      if (taken && taken.id !== product.id) {
+        throw new ValidationError(`SKU ${product.retiredSku} is now used by ${taken.name}. Change that product's SKU first, then restore.`);
+      }
+    }
+    // The barcode comes back only if nobody has taken it meanwhile.
+    let barcode: string | null = product.retiredBarcode;
+    if (barcode && (await tx.readyProduct.findUnique({ where: { barcode } }))) barcode = null;
+
     const updated = await tx.readyProduct.updateMany({
       where: { id: product.id, deletedAt: { not: null } },
-      data: { deletedAt: null, deletedById: null, deleteReason: null, active: true },
+      data: { deletedAt: null, deletedById: null, deleteReason: null, active: true, sku, barcode, retiredSku: null, retiredBarcode: null },
     });
     if (updated.count !== 1) throw new ValidationError("This product is not deleted.");
     await evaluateLowStock(tx, product.id, todayInTz(settings.timezone));
@@ -266,8 +336,12 @@ export async function restoreProduct(actor: Actor, input: unknown) {
       action: "product.restore",
       entityType: "ReadyProduct",
       entityId: product.id,
-      summary: `Restored product ${product.name} (${product.sku}): ${data.reason}`,
-      details: { reason: data.reason, previousDeleteReason: product.deleteReason },
+      summary: `Restored product ${product.name} (${sku}): ${data.reason}`,
+      details: {
+        reason: data.reason,
+        previousDeleteReason: product.deleteReason,
+        barcodeRestored: barcode !== null || !product.retiredBarcode,
+      },
     });
   });
 }
@@ -299,7 +373,7 @@ export async function setProductActive(actor: Actor, id: string, active: boolean
 const receiptSchema = z.object({
   idempotencyKey,
   productId: requiredText(50, "Product"),
-  batchNo: optionalText(40),
+  batchNo: batchNoText,
   receivedDate: isoDay,
   expiryDate: optionalDay,
   quantity: positiveQty,
@@ -382,6 +456,219 @@ export async function receiveStock(actor: Actor, input: unknown) {
     }
     throw e;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Batch corrections (admin only, reason mandatory, recorded on the product's history)
+// ---------------------------------------------------------------------------
+
+/** Remove the given (batch, bucket) quantities with adjustments carrying `reason`. */
+async function writeOffBalances(
+  tx: Tx,
+  actor: Actor,
+  product: { id: string; unitId: string },
+  rows: { batchId: string; bucket: StockBucket; qty: Prisma.Decimal.Value }[],
+  reason: string,
+) {
+  const out: { adjustmentNo: string; batchId: string; bucket: StockBucket; quantity: string }[] = [];
+  for (const r of rows) {
+    const qty = dec(r.qty);
+    if (qty.lte(0)) continue;
+    const adj = await tx.inventoryAdjustment.create({
+      data: {
+        adjustmentNo: await nextNumber(tx, "adjustment"),
+        productId: product.id,
+        batchId: r.batchId,
+        bucket: r.bucket,
+        quantityDelta: qty.negated(),
+        reason,
+        idempotencyKey: randomUUID(),
+        createdById: actor.id,
+      },
+    });
+    await postProductTxn(tx, actor, {
+      type: "ADJUSTMENT",
+      productId: product.id,
+      batchId: r.batchId,
+      bucket: r.bucket,
+      unitId: product.unitId,
+      quantity: qty.negated(),
+      adjustmentId: adj.id,
+      reference: adj.adjustmentNo,
+      notes: reason,
+    });
+    out.push({ adjustmentNo: adj.adjustmentNo, batchId: r.batchId, bucket: r.bucket, quantity: qty.toString() });
+  }
+  return out;
+}
+
+const batchEditSchema = z.object({
+  batchId: requiredText(50, "Batch"),
+  batchNo: z
+    .string()
+    .trim()
+    .min(1, "Batch number is required")
+    .max(40)
+    .regex(/^[^~]+$/, "Batch numbers can't contain ~"),
+  receivedDate: isoDay,
+  expiryDate: optionalDay,
+  reason: requiredText(1000, "Reason for the change"),
+});
+
+/**
+ * Correct a batch's number, received date or expiry date (e.g. mistyped at
+ * receipt). The expiry date decides whether stock is available and the order
+ * dispatches use, so this is an admin correction with a reason.
+ */
+export async function updateBatch(actor: Actor, input: unknown) {
+  assertCan(actor, "inventory.adjust");
+  const data = parse(batchEditSchema, input);
+  const settings = await readSettings();
+  const today = todayInTz(settings.timezone);
+  try {
+    return await withTransaction(async (tx) => {
+      const batch = await tx.productBatch.findUnique({ where: { id: data.batchId }, include: { product: true } });
+      if (!batch || batch.deletedAt) throw new NotFoundError("Batch");
+      if (batch.product.deletedAt) throw new ValidationError("This product has been deleted.");
+      const tracks = batch.product.tracksExpiry;
+      if (tracks && !data.expiryDate) throw new ValidationError("Enter the expiry date.", { expiryDate: "Required" });
+      if (data.receivedDate > today)
+        throw new ValidationError("The received date can't be in the future.", { receivedDate: "In the future" });
+      if (data.expiryDate && data.expiryDate < data.receivedDate) {
+        throw new ValidationError("The expiry date can't be before the received date.", { expiryDate: "Before received date" });
+      }
+      const expiry = tracks ? (data.expiryDate ?? null) : dateOnlyString(batch.expiryDate);
+      const changes = diffFields([
+        { field: "batchNo", label: "Batch number", from: batch.batchNo, to: data.batchNo },
+        {
+          field: "receivedDate",
+          label: "Received date",
+          from: dateOnlyString(batch.receivedDate),
+          to: data.receivedDate,
+        },
+        { field: "expiryDate", label: "Expiry date", from: dateOnlyString(batch.expiryDate), to: expiry },
+      ]);
+      if (changes.length === 0) throw new ValidationError("Nothing was changed.");
+
+      await tx.productBatch.update({
+        where: { id: batch.id },
+        data: { batchNo: data.batchNo, receivedDate: dateOnly(data.receivedDate), expiryDate: expiry ? dateOnly(expiry) : null },
+      });
+      await evaluateLowStock(tx, batch.productId, today);
+      await audit(tx, {
+        actorId: actor.id,
+        action: "batch.update",
+        entityType: "ReadyProduct",
+        entityId: batch.productId,
+        summary: `Edited batch ${batch.batchNo} of ${batch.product.name}: ${describeChanges(changes)}`,
+        details: { changes: changes as unknown as Prisma.InputJsonValue, reason: data.reason, batchId: batch.id },
+      });
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) throw new ValidationError("This product already has a batch with that number.", { batchNo: "Already used" });
+    throw e;
+  }
+}
+
+export interface BatchDeletionPreview {
+  batchNo: string;
+  product: string;
+  unit: string;
+  holdings: { bucket: StockBucket; qty: string }[];
+  /** Units dispatched from this batch that can still come back as returns. */
+  returnable: string;
+}
+
+export async function batchDeletionPreview(actor: Actor, batchId: string): Promise<BatchDeletionPreview> {
+  assertCan(actor, "inventory.adjust");
+  const batch = await prisma.productBatch.findUnique({
+    where: { id: batchId },
+    include: { product: { include: { unit: true } }, balances: { where: { quantity: { gt: 0 } } } },
+  });
+  if (!batch || batch.deletedAt) throw new NotFoundError("Batch");
+  return {
+    batchNo: batch.batchNo,
+    product: batch.product.name,
+    unit: batch.product.unit.code,
+    holdings: batch.balances.map((b) => ({ bucket: b.bucket, qty: dec(b.quantity).toString() })),
+    returnable: (await returnableFromBatch(prisma, batch.id)).toString(),
+  };
+}
+
+async function returnableFromBatch(db: Tx | typeof prisma, batchId: string) {
+  const [row] = await db.$queryRaw<{ qty: Prisma.Decimal | null }[]>`
+    SELECT SUM(a."quantity" - a."returnedQty") AS qty
+    FROM "DispatchAllocation" a JOIN "DispatchLine" l ON l."id" = a."lineId" JOIN "Dispatch" d ON d."id" = l."dispatchId"
+    WHERE a."batchId" = ${batchId} AND d."status" = 'POSTED'`;
+  return dec(row?.qty);
+}
+
+const batchDeleteSchema = z.object({
+  batchId: requiredText(50, "Batch"),
+  reason: requiredText(1000, "Reason for deleting"),
+  writeOffStock: z.preprocess((v) => v === true || v === "true", z.boolean()).default(false),
+});
+
+/**
+ * Delete a batch entered by mistake. Remaining stock is written off (after the
+ * caller confirms), the batch number is freed, and the batch disappears from
+ * lists. Blocked while dispatched goods from it could still be returned.
+ */
+export async function deleteBatch(actor: Actor, input: unknown) {
+  assertCan(actor, "inventory.adjust");
+  const data = parse(batchDeleteSchema, input);
+  const settings = await readSettings();
+  return withTransaction(async (tx) => {
+    const batch = await tx.productBatch.findUnique({ where: { id: data.batchId }, include: { product: { include: { unit: true } } } });
+    if (!batch || batch.deletedAt) throw new NotFoundError("Batch");
+    // Same lock order as receipts and product deletion: product, then balances.
+    await tx.$queryRaw`SELECT "id" FROM "ReadyProduct" WHERE "id" = ${batch.productId} FOR UPDATE`;
+    const balances = await tx.$queryRaw<{ batchId: string; bucket: StockBucket; qty: Prisma.Decimal }[]>`
+      SELECT "batchId", "bucket", "quantity" AS qty FROM "StockBalance" WHERE "batchId" = ${batch.id} FOR UPDATE`;
+
+    const returnable = await returnableFromBatch(tx, batch.id);
+    if (returnable.gt(0)) {
+      throw new ValidationError(
+        `${returnable.toString()} ${batch.product.unit.code} dispatched from batch ${batch.batchNo} could still be returned, so it can't be deleted. Adjust its stock instead.`,
+      );
+    }
+    const held = balances.filter((b) => dec(b.qty).gt(0));
+    if (held.length && !data.writeOffStock) {
+      const list = held.map((b) => `${dec(b.qty).toString()} ${batch.product.unit.code} ${b.bucket.toLowerCase()}`).join(", ");
+      throw new ValidationError(`Batch ${batch.batchNo} still has stock (${list}). Confirm writing it off to delete the batch.`);
+    }
+    const writtenOff = await writeOffBalances(
+      tx,
+      actor,
+      batch.product,
+      held,
+      `Written off on batch deletion (${batch.batchNo}): ${data.reason}`,
+    );
+    await tx.productBatch.update({
+      where: { id: batch.id },
+      data: { deletedAt: new Date(), deleteReason: data.reason, batchNo: `${batch.batchNo}~${Date.now().toString(36).toUpperCase()}` },
+    });
+    await evaluateLowStock(tx, batch.productId, todayInTz(settings.timezone));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "batch.delete",
+      entityType: "ReadyProduct",
+      entityId: batch.productId,
+      summary: `Deleted batch ${batch.batchNo} of ${batch.product.name}${writtenOff.length ? ", writing off its remaining stock" : ""}: ${data.reason}`,
+      details: {
+        reason: data.reason,
+        batchId: batch.id,
+        writtenOff,
+        snapshot: {
+          batchNo: batch.batchNo,
+          receivedDate: dateOnlyString(batch.receivedDate),
+          expiryDate: dateOnlyString(batch.expiryDate),
+          initialQty: dec(batch.initialQty).toString(),
+        },
+      },
+    });
+    return { writtenOff: writtenOff.length };
+  });
 }
 
 // ---------------------------------------------------------------------------

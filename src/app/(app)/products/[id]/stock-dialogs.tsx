@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, PackagePlus, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Loader2, PackagePlus, Pencil, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -9,7 +9,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field, FormError, NativeSelect } from "@/components/forms/field";
 import { useIdempotencyKey, useSubmit } from "@/components/forms/use-submit";
 import type { ActionResult } from "@/server/action";
-import { adjustStockAction, disposeAction, receiveStockAction } from "../actions";
+import { StockWarningDelete } from "@/components/forms/stock-warning-delete";
+import {
+  adjustStockAction,
+  batchDeletionPreviewAction,
+  deleteBatchAction,
+  disposeAction,
+  receiveStockAction,
+  updateBatchAction,
+} from "../actions";
 
 export interface BatchOption {
   id: string;
@@ -221,5 +229,86 @@ export function DisposeDialog({ unit, batches }: { unit: string; batches: BatchO
         </>
       )}
     </StockDialog>
+  );
+}
+
+export interface BatchRow {
+  id: string;
+  batchNo: string;
+  /** YYYY-MM-DD */
+  receivedDate: string;
+  expiryDate: string | null;
+}
+
+/** Edit and delete buttons for one row of the batches table. */
+export function BatchActions({ batch, tracksExpiry, today }: { batch: BatchRow; tracksExpiry: boolean; today: string }) {
+  return (
+    <div className="flex justify-end gap-0.5">
+      <StockDialog
+        trigger={
+          <Button variant="ghost" size="icon" className="size-7" aria-label={`Edit batch ${batch.batchNo}`} title="Edit batch">
+            <Pencil className="size-3.5" />
+          </Button>
+        }
+        title={`Edit batch ${batch.batchNo}`}
+        description="Correct details entered by mistake. Quantities change through adjustments, not here. The old and new values are kept in the change history."
+        action={updateBatchAction}
+        submitLabel="Save changes"
+      >
+        {(e) => (
+          <>
+            <input type="hidden" name="batchId" value={batch.id} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Batch number" htmlFor={`be-no-${batch.id}`} required error={e.batchNo} className="sm:col-span-2">
+                <Input id={`be-no-${batch.id}`} name="batchNo" defaultValue={batch.batchNo} maxLength={40} required />
+              </Field>
+              <Field label="Received / manufactured date" htmlFor={`be-rec-${batch.id}`} required error={e.receivedDate}>
+                <Input id={`be-rec-${batch.id}`} name="receivedDate" type="date" defaultValue={batch.receivedDate} max={today} required />
+              </Field>
+              {tracksExpiry && (
+                <Field label="Expiry date" htmlFor={`be-exp-${batch.id}`} required error={e.expiryDate}>
+                  <Input id={`be-exp-${batch.id}`} name="expiryDate" type="date" defaultValue={batch.expiryDate ?? ""} required />
+                </Field>
+              )}
+            </div>
+            <Field label="Reason for the change" htmlFor={`be-reason-${batch.id}`} required error={e.reason}>
+              <Textarea
+                id={`be-reason-${batch.id}`}
+                name="reason"
+                rows={2}
+                maxLength={1000}
+                required
+                placeholder="e.g. Expiry date mistyped at receipt"
+              />
+            </Field>
+          </>
+        )}
+      </StockDialog>
+      <StockWarningDelete
+        trigger={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-destructive hover:text-destructive"
+            aria-label={`Delete batch ${batch.batchNo}`}
+            title="Delete batch"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        }
+        title={`Delete batch ${batch.batchNo}?`}
+        description={
+          <p>
+            The batch disappears from stock lists and pickers, and its batch number can be used again. Its transactions stay in the ledger
+            and the deletion is recorded in the change history.
+          </p>
+        }
+        what="batch"
+        preview={() => batchDeletionPreviewAction(batch.id)}
+        fields={{ batchId: batch.id }}
+        action={deleteBatchAction}
+        confirmLabel="Delete batch"
+      />
+    </div>
   );
 }

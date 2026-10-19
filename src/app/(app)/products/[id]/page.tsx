@@ -18,9 +18,10 @@ import { Button } from "@/components/ui/button";
 import { EXPIRY_STATUS } from "@/lib/labels";
 import { dateOnlyString, daysBetween, formatCalendarDate, formatDateTime, todayInTz } from "@/lib/dates";
 import { dec, formatQty, qtyString } from "@/lib/decimal";
-import { deleteProductAction, restoreProductAction, setProductActiveAction } from "../actions";
+import { deleteProductAction, productDeletionPreviewAction, restoreProductAction, setProductActiveAction } from "../actions";
 import { AuditTrail } from "@/components/app/audit-trail";
-import { AdjustDialog, DisposeDialog, ReceiveDialog, type BatchOption } from "./stock-dialogs";
+import { StockWarningDelete } from "@/components/forms/stock-warning-delete";
+import { AdjustDialog, BatchActions, DisposeDialog, ReceiveDialog, type BatchOption } from "./stock-dialogs";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const row = await prisma.readyProduct.findUnique({ where: { id: (await params).id }, select: { name: true } });
@@ -36,6 +37,7 @@ export default async function ProductDetail({
 }) {
   const actor = await requirePage("product.view");
   const { id } = await params;
+  const query = await searchParams;
   const settings = await getSettings();
   const today = todayInTz(settings.timezone);
   const product = await prisma.readyProduct.findUnique({
@@ -43,7 +45,11 @@ export default async function ProductDetail({
     include: {
       unit: true,
       category: true,
-      batches: { orderBy: [{ expiryDate: { sort: "asc", nulls: "last" } }, { receivedDate: "asc" }], include: { balances: true } },
+      batches: {
+        where: { deletedAt: null },
+        orderBy: [{ expiryDate: { sort: "asc", nulls: "last" } }, { receivedDate: "asc" }],
+        include: { balances: true },
+      },
       lowStockAlerts: { orderBy: { triggeredAt: "desc" }, take: 5 },
       deletedBy: { select: { name: true } },
     },
@@ -70,7 +76,11 @@ export default async function ProductDetail({
     expired: qtyString(x.expired),
     isExpired: x.status === "EXPIRED",
   }));
-  const visibleBatches = batches.filter((x) => !(x.saleable.isZero() && x.quarantine.isZero() && x.damaged.isZero() && x.expired.isZero()));
+  const isEmpty = (x: (typeof batches)[number]) => x.saleable.isZero() && x.quarantine.isZero() && x.damaged.isZero() && x.expired.isZero();
+  const emptyCount = batches.filter(isEmpty).length;
+  const showEmpty = query.emptyBatches === "1";
+  const visibleBatches = showEmpty ? batches : batches.filter((x) => !isEmpty(x));
+  const editBatches = can(actor, "inventory.adjust") && !deleted;
 
   return (
     <>
@@ -131,7 +141,7 @@ export default async function ProductDetail({
                     action={setProductActiveAction}
                     destructive={product.active}
                   />
-                  <ConfirmAction
+                  <StockWarningDelete
                     trigger={
                       <Button variant="ghost" className="text-destructive hover:text-destructive">
                         <Trash2 /> Delete
@@ -139,19 +149,16 @@ export default async function ProductDetail({
                     }
                     title={`Delete ${product.name}?`}
                     description={
-                      <>
-                        <p>
-                          The product disappears from the product master, stock lists and pickers. Its batches, transactions and reports are
-                          kept, the SKU stays reserved, and it can be restored.
-                        </p>
-                        <p>Deleting is only possible when it holds no stock in any bucket.</p>
-                      </>
+                      <p>
+                        The product disappears from the product master, stock lists and pickers, and its SKU and barcode can be used again.
+                        Its transactions and reports are kept, and it can be restored from the product master.
+                      </p>
                     }
-                    reasonLabel="Reason for deleting"
-                    confirmLabel="Delete product"
-                    destructive
+                    what="product"
+                    preview={productDeletionPreviewAction.bind(null, product.id)}
                     fields={{ productId: product.id }}
                     action={deleteProductAction}
+                    confirmLabel="Delete product"
                   />
                 </>
               )}
@@ -205,7 +212,7 @@ export default async function ProductDetail({
             <p className="px-4 py-6 text-sm text-muted-foreground">No stock on hand.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm whitespace-nowrap">
                 <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2">Batch</th>
@@ -216,6 +223,11 @@ export default async function ProductDetail({
                     <th className="px-4 py-2 text-right">Damaged</th>
                     <th className="px-4 py-2 text-right">Expired</th>
                     <th className="px-4 py-2">Status</th>
+                    {editBatches && (
+                      <th className="sticky right-0 bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))] px-2 py-2">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -242,11 +254,31 @@ export default async function ProductDetail({
                         <td className="px-4 py-2">
                           <Pill map={EXPIRY_STATUS} value={status} />
                         </td>
+                        {editBatches && (
+                          <td className="sticky right-0 bg-card px-2 py-1.5 shadow-[-8px_0_8px_-8px_rgb(0_0_0/0.15)]">
+                            <BatchActions
+                              batch={{ id: b.id, batchNo: b.batchNo, receivedDate: dateOnlyString(b.receivedDate)!, expiryDate: day }}
+                              tracksExpiry={product.tracksExpiry}
+                              today={today}
+                            />
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+          {emptyCount > 0 && (
+            <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+              <Link
+                href={showEmpty ? `/products/${product.id}` : `/products/${product.id}?emptyBatches=1`}
+                scroll={false}
+                className="hover:text-foreground hover:underline"
+              >
+                {showEmpty ? "Hide batches with no stock" : `Show ${emptyCount} ${emptyCount === 1 ? "batch" : "batches"} with no stock`}
+              </Link>
             </div>
           )}
         </SectionCard>
@@ -306,7 +338,7 @@ export default async function ProductDetail({
           <h2 className="text-lg font-semibold">Stock movement ledger</h2>
           <ReportView
             def={getReport("pr-ledger")!}
-            params={await searchParams}
+            params={query}
             basePath={`/products/${id}`}
             fixed={{ productId: id }}
             hide={["categoryId"]}

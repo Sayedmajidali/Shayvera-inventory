@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
-import { BUCKET, EXPIRY_STATUS, PRODUCT_TXN_TYPE, STOCK_STATUS, toOptions } from "@/lib/labels";
+import { batchLabel, BUCKET, EXPIRY_STATUS, PRODUCT_TXN_TYPE, STOCK_STATUS, toOptions } from "@/lib/labels";
 import { and, badge, calDay, dt, like, link, paging, qty, range, sqlOrder, sqlPaging } from "./util";
 import type { Filters, ReportDef, RunContext } from "./types";
 import { can } from "../permissions";
@@ -309,6 +309,7 @@ function batchReport(key: string, title: string, description: string, onlyAlerts
           JOIN "ReadyProduct" p ON p."id" = b."productId"
           JOIN "Unit" u ON u."id" = p."unitId"
           LEFT JOIN "StockBalance" sb ON sb."batchId" = b."id"
+          WHERE b."deletedAt" IS NULL
           GROUP BY b."id", p."id", u."code"
         )
         SELECT * FROM x ${and(parts)}`;
@@ -481,7 +482,7 @@ export const productLedger: ReportDef = {
         date: dt(ctx, t.createdAt),
         product: link(t.product.name, `/products/${t.productId}`),
         sku: t.product.sku,
-        batch: t.batch.batchNo,
+        batch: batchLabel(t.batch),
         type: PRODUCT_TXN_TYPE[t.type] ?? t.type,
         bucket: badge(BUCKET, t.bucket),
         quantity: `${t.quantity.gt(0) ? "+" : ""}${qty(t.quantity)} ${t.unit.code}`,
@@ -550,7 +551,7 @@ const adjustmentReport: ReportDef = {
         date: dt(ctx, a.createdAt),
         product: link(a.product.name, `/products/${a.productId}`),
         sku: a.product.sku,
-        batch: a.batch.batchNo,
+        batch: batchLabel(a.batch),
         bucket: badge(BUCKET, a.bucket),
         delta: `${a.quantityDelta.gt(0) ? "+" : ""}${qty(a.quantityDelta)} ${a.product.unit.code}`,
         reason: a.reason,

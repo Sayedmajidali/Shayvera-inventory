@@ -13,7 +13,7 @@ import { AttachmentList } from "@/components/docs/attachment-list";
 import { UploadDialog } from "@/components/docs/upload-dialog";
 import { ConfirmAction } from "@/components/forms/confirm-action";
 import { Button } from "@/components/ui/button";
-import { BUCKET, DOC_STATUS, RETURN_CONDITION } from "@/lib/labels";
+import { batchLabel, BUCKET, DOC_STATUS, RETURN_CONDITION } from "@/lib/labels";
 import { formatDateTime } from "@/lib/dates";
 import { formatQty } from "@/lib/decimal";
 import { reverseReturnAction, uploadEcomDocAction } from "../../actions";
@@ -145,7 +145,7 @@ export default async function ReturnDetail({ params }: { params: Promise<{ id: s
                   <tr key={t.id}>
                     <td className="px-4 py-2">{t.txnNo}</td>
                     <td className="px-4 py-2">{t.type === "REVERSAL" ? "Reversal" : "Return"}</td>
-                    <td className="px-4 py-2">{t.batch.batchNo}</td>
+                    <td className="px-4 py-2">{batchLabel(t.batch)}</td>
                     <td className="px-4 py-2">
                       <Pill map={BUCKET} value={t.bucket} />
                     </td>
